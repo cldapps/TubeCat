@@ -62,6 +62,9 @@
   }
   #content::-webkit-scrollbar{ display:none; }
 
+  /* Removes device native cursor outlines to let our custom .focused style takeover cleanly */
+  .item:focus, .btn:focus, input:focus { outline: none; }
+
   .list { list-style:none; margin:0; padding:0; }
   .item {
     padding:7px 6px;
@@ -193,8 +196,14 @@
     text-align:left;
     margin-bottom:6px;
   }
+  
+  /* Upgraded button focusing styles for D-pad navigation */
+  .btn-upload { background:#222; color:#fff; text-align:center; margin-top:5px; }
+  .btn-upload.focused { background:#e33; border: 1px solid #fff; }
   .btn-watch { background:#e33; color:#fff; }
+  .btn-watch.focused { background:#f55; border: 1px solid #fff; }
   .btn-watched { background:#333; color:#fff; }
+  .btn-watched.focused { background:#555; border: 1px solid #fff; }
 </style>
 </head>
 <body>
@@ -314,14 +323,14 @@ function idbDeleteByChannel(storeName, channelId){
 
 /* ---------------- STATE ---------------- */
 var state = {
-  screen: "home",         // home | channel | addChannel | settings | videoDetail | playlistDetail
-  homeTab: "videos",      // videos | playlists | channels | shorts
-  channelTab: "videos",   // videos | playlists | shorts
+  screen: "home",         
+  homeTab: "videos",      
+  channelTab: "videos",   
   focusIndex: 0,
   currentChannel: null,
   currentPlaylist: null,
-  playlistSource: null,   // "home" or "channel" to know where back should return
-  playlistData: [],       // cached items for current opened playlist
+  playlistSource: null,   
+  playlistData: [],       
   homeData: { videos:[], playlists:[], shorts:[] },
   channelData: { videos:[], playlists:[], shorts:[] },
   toast: null,
@@ -656,7 +665,7 @@ function openPlaylistDetail(pl){
 
 function openAddChannel(){ state.screen = "addChannel"; state.formFocus = 0; state.formValues = { input:"", label:"" }; render(); }
 function openSettings(){ state.screen = "settings"; state.formFocus = 0; state.formValues = { apiKey: apiKey }; render(); }
-function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; render(); }
+function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; state.focusIndex = 0; render(); }
 function openUrl(url){ window.open(url, "_blank"); }
 
 function doWatch(){
@@ -715,18 +724,18 @@ function renderTabs(){
 function fmtVideoItem(v, focused){
   var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
   var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
-  return '<li class="item' + (focused?' focused':'') + '" data-kind="video" data-id="' + esc(v.id) + '">' +
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="video" data-id="' + esc(v.id) + '">' +
     watched + badge + esc(v.title) +
     '<span class="meta">' + esc(v.channelLabel||"") + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
     '</li>';
 }
 function fmtPlaylistItem(p, focused){
-  return '<li class="item' + (focused?' focused':'') + '" data-kind="playlist" data-id="' + esc(p.id) + '">' +
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="playlist" data-id="' + esc(p.id) + '">' +
     esc(p.title) + '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
 }
 function fmtChannelItem(c, idx, focused){
   var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
-  return '<li class="item' + (focused?' focused':'') + '" data-kind="channel" data-idx="' + idx + '">' +
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="channel" data-idx="' + idx + '">' +
     '<div class="channel-row"><span class="name">' + esc(c.label) + '</span></div>' +
     '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span>' +
     '</li>';
@@ -747,12 +756,15 @@ function renderList(items, kind){
   });
   html += "</ul>";
   $content.innerHTML = html;
-  scrollFocusedIntoView();
 }
 
 function scrollFocusedIntoView(){
-  var el = $content.querySelector(".item.focused");
-  if(el && el.scrollIntoView){ el.scrollIntoView({ block: "nearest" }); }
+  var el = $content.querySelector(".focused"); // .item.focused, .fld.focused, .btn.focused
+  if(el){
+    if(el.scrollIntoView){ el.scrollIntoView({ block: "nearest" }); }
+    // Manually force DOM focus to block standard D-Pad traversal confusion
+    if(typeof el.focus === 'function') { el.focus(); }
+  }
 }
 
 function renderContent(){
@@ -780,6 +792,9 @@ function renderContent(){
     t.textContent = state.toast;
     document.getElementById("app").appendChild(t);
   }
+
+  // Enforce Physical Dom Focus over CSS
+  setTimeout(scrollFocusedIntoView, 0); 
 }
 
 function renderAddChannelForm(){
@@ -787,10 +802,10 @@ function renderAddChannelForm(){
   $content.innerHTML =
     '<div class="form-view">' +
     '<label>Channel ID, @handle, or URL</label>' +
-    '<input type="text" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
+    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
     '<div class="hint">e.g. @veritasium or UCHnyfMqiRRG...</div>' +
     '<label>Label (optional)</label>' +
-    '<input type="text" class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
+    '<input type="text" tabindex="-1" class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
     '</div>';
 }
 
@@ -799,10 +814,11 @@ function renderSettingsForm(){
   $content.innerHTML =
     '<div class="form-view">' +
     '<label>YouTube Data API v3 Key</label>' +
-    '<input type="text" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
+    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
     '<div class="hint">Type your key or upload a txt file below</div>' +
     '<label style="margin-top:12px;">Upload API Key (.txt)</label>' +
-    '<input type="file" id="api-file" accept=".txt" style="display:block; width:100%; margin-top:5px; font-size:11px;" />' +
+    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===1?' focused':'') + '" id="btn-upload">Choose File</button>' +
+    '<input type="file" id="api-file" accept=".txt" style="display:none;" />' +
     '</div>';
 }
 
@@ -812,8 +828,8 @@ function renderVideoDetail(){
   var isWatched = watchedMap[v.id];
   
   var btns = '<div style="margin-bottom:12px;">' +
-    '<button class="btn btn-watch" id="btn-watch">1. Watch</button>' +
-    '<button class="btn btn-watched" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
+    '<button tabindex="0" class="btn btn-watch' + (state.focusIndex===0?' focused':'') + '" id="btn-watch">1. Watch</button>' +
+    '<button tabindex="-1" class="btn btn-watched' + (state.focusIndex===1?' focused':'') + '" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
     '</div>';
 
   $content.innerHTML =
@@ -840,9 +856,9 @@ function renderSoftkeys(){
   } else if(state.screen === "addChannel"){
     $skLeft.textContent = "Cancel"; $skCenter.textContent = "Edit field"; $skRight.textContent = "Save";
   } else if(state.screen === "settings"){
-    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Edit"; $skRight.textContent = "Save";
+    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Action"; $skRight.textContent = "Save";
   } else if(state.screen === "videoDetail"){
-    $skLeft.textContent = "Back"; $skCenter.textContent = "Watch"; $skRight.textContent = "Watched";
+    $skLeft.textContent = "Back"; $skCenter.textContent = "Select"; $skRight.textContent = "Watched";
   }
 }
 
@@ -891,10 +907,16 @@ function doCenterAction(){
     else openVideoDetail(it);
   } else if(state.screen === "playlistDetail"){
     if(it) openVideoDetail(it);
-  } else if(state.screen === "addChannel" || state.screen === "settings"){
+  } else if(state.screen === "addChannel"){
     editCurrentField();
+  } else if(state.screen === "settings"){
+    if(state.formFocus === 0) { editCurrentField(); }
+    else { document.getElementById("api-file").click(); }
   } else if(state.screen === "videoDetail"){
-    if(state.detailVideo) doWatch();
+    if(state.detailVideo) {
+      if(state.focusIndex === 0) doWatch();
+      else toggleWatched();
+    }
   }
 }
 
@@ -987,9 +1009,25 @@ function refreshAllChannels(){
   chain.then(function(){ showToast("All channels refreshed"); loadHomeData(); });
 }
 
-/* Key handling */
+/* Key handling - With Feature Phone Fixes Applied */
 document.addEventListener("keydown", function(e){
   var key = e.key;
+  var code = e.keyCode || e.which;
+
+  // OS Mapping Fixes: Translating hardware specific keys and keyCodes to standard names
+  if (key === "SoftLeft" || key === "F1" || code === 112 || code === 135 || code === 21) key = "SoftLeft";
+  else if (key === "SoftRight" || key === "F2" || code === 113 || code === 136 || code === 22) key = "SoftRight";
+  else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
+  else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
+  else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
+  else if (key === "ArrowRight" || key === "Right" || code === 39) key = "ArrowRight";
+  else if (key === "Enter" || code === 13) key = "Enter";
+  else if (key === "Backspace" || key === "BrowserBack" || code === 8 || code === 4 || code === 27) key = "Backspace";
+
+  // Prevent default scroll/focus behaviors which conflict on Cloudfone/KaiOS devices
+  var navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "SoftLeft", "SoftRight", "Enter"];
+  if(navKeys.indexOf(key) !== -1) { e.preventDefault(); }
+
   switch(key){
     case "1":
       if(state.screen === "home"){ e.preventDefault(); switchHomeTab("videos"); }
@@ -1009,18 +1047,28 @@ document.addEventListener("keydown", function(e){
       if(state.screen === "home"){ e.preventDefault(); switchHomeTab("shorts"); }
       break;
     case "ArrowUp":
-      e.preventDefault();
-      if(state.screen==="addChannel"||state.screen==="settings"){ state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); } else { moveFocus(-1); }
+      if(state.screen==="addChannel" || state.screen==="settings"){ 
+        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
+      } else if (state.screen==="videoDetail") { 
+        state.focusIndex = Math.max(0, state.focusIndex - 1); renderContent(); 
+      } else { 
+        moveFocus(-1); 
+      }
       break;
     case "ArrowDown":
-      e.preventDefault();
-      if(state.screen==="addChannel"){ state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); } else if(state.screen==="settings"){} else { moveFocus(1); }
+      if(state.screen==="addChannel" || state.screen==="settings"){ 
+        state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); 
+      } else if (state.screen==="videoDetail") { 
+        state.focusIndex = Math.min(1, state.focusIndex + 1); renderContent(); 
+      } else { 
+        moveFocus(1); 
+      }
       break;
-    case "ArrowLeft": e.preventDefault(); switchTab(-1); break;
-    case "ArrowRight": e.preventDefault(); switchTab(1); break;
-    case "Enter": e.preventDefault(); doCenterAction(); break;
-    case "SoftLeft": case "F1": e.preventDefault(); doLeftAction(); break;
-    case "SoftRight": case "F2": e.preventDefault(); doRightAction(); break;
+    case "ArrowLeft": switchTab(-1); break;
+    case "ArrowRight": switchTab(1); break;
+    case "Enter": doCenterAction(); break;
+    case "SoftLeft": doLeftAction(); break;
+    case "SoftRight": doRightAction(); break;
     case "Backspace": if(state.screen !== "home"){ e.preventDefault(); doLeftAction(); } break;
   }
 });
