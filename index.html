@@ -125,7 +125,7 @@
   /* FORM / MODAL VIEW */
   .form-view { padding:10px 8px; }
   .form-view label { display:block; font-size:11px; color:#999; margin-bottom:3px; }
-  .form-view input {
+  .form-view input[type="text"] {
     width:100%;
     padding:6px;
     font-size:13px;
@@ -135,7 +135,7 @@
     margin-bottom:12px;
     border-radius:2px;
   }
-  .form-view input.focused { border-color:#e33; background:#222; }
+  .form-view input[type="text"].focused { border-color:#e33; background:#222; }
   .form-view .hint { color:#777; font-size:10.5px; margin-top:-8px; margin-bottom:12px; }
 
   .toast {
@@ -151,21 +151,6 @@
     border:1px solid #444;
     z-index:50;
     text-align:center;
-  }
-
-  .spinner-line {
-    text-align:center;
-    color:#e33;
-    font-size:11px;
-    padding:10px;
-  }
-
-  .section-label {
-    padding:5px 6px 3px;
-    font-size:10.5px;
-    color:#888;
-    text-transform:uppercase;
-    letter-spacing:0.5px;
   }
 
   .video-detail {
@@ -196,6 +181,20 @@
     color:#777;
     word-break:break-all;
   }
+  
+  .btn {
+    display:block;
+    width:100%;
+    padding:8px;
+    border:none;
+    border-radius:3px;
+    font-size:12px;
+    font-weight:bold;
+    text-align:left;
+    margin-bottom:6px;
+  }
+  .btn-watch { background:#e33; color:#fff; }
+  .btn-watched { background:#333; color:#fff; }
 </style>
 </head>
 <body>
@@ -213,34 +212,21 @@
 <script>
 /* ============================================================
    TubeCat — personal YouTube catalog for feature phones
-   Single-file static PWA. Storage: localStorage (channel list,
-   settings, API key) + IndexedDB (videos/playlists/shorts cache).
-   Navigation: D-pad (arrow keys) + Enter/softkeys, also usable
-   with touch/click as a fallback.
    ============================================================ */
 
 (function(){
 "use strict";
 
 /* ---------------- CONFIG ---------------- */
-// Put a default API key here if you want to ship with one baked in.
-// Otherwise leave blank and the app will prompt the user to enter
-// their own YouTube Data API v3 key on first run (Settings screen).
 var DEFAULT_API_KEY = "";
-
-// Hardcoded starter channels (edit freely). Use channel ID (UC...),
-// @handle, or full channel URL — the app will resolve it.
-var HARDCODED_CHANNELS = [
-  // { input: "UC_x5XG1OV2P6uZZ5FSM9Ttw", label: "Google Developers" }
-];
-
-var MAX_PER_CHANNEL_FETCH = 150;   // safety cap per channel per update (quota control)
+var HARDCODED_CHANNELS = [];
+var MAX_PER_CHANNEL_FETCH = 150;
 var PAGE_SIZE = 50;
 
-/* ---------------- STORAGE: localStorage keys ---------------- */
-var LS_CHANNELS = "tc_channels_v1";      // array of channel meta objects
+/* ---------------- STORAGE: localStorage ---------------- */
+var LS_CHANNELS = "tc_channels_v1";
 var LS_APIKEY   = "tc_apikey_v1";
-var LS_LASTVIEW = "tc_lastview_v1";
+var LS_WATCHED  = "tc_watched_v1";
 
 function lsGet(key, fallback){
   try {
@@ -328,42 +314,40 @@ function idbDeleteByChannel(storeName, channelId){
 
 /* ---------------- STATE ---------------- */
 var state = {
-  screen: "home",         // home | channel | channelList | addChannel | settings | videoDetail
-  homeTab: "videos",      // videos | playlists | shorts
-  channelTab: "videos",
+  screen: "home",         // home | channel | addChannel | settings | videoDetail | playlistDetail
+  homeTab: "videos",      // videos | playlists | channels | shorts
+  channelTab: "videos",   // videos | playlists | shorts
   focusIndex: 0,
-  currentChannel: null,   // channel object when in channel screen
+  currentChannel: null,
+  currentPlaylist: null,
+  playlistSource: null,   // "home" or "channel" to know where back should return
+  playlistData: [],       // cached items for current opened playlist
   homeData: { videos:[], playlists:[], shorts:[] },
   channelData: { videos:[], playlists:[], shorts:[] },
   toast: null,
   toastTimer: null,
-  formFocus: 0,           // for addChannel form field focus
+  formFocus: 0,
   formValues: { input:"", label:"" },
   detailVideo: null,
-  updating: {}            // channelId -> bool
+  updating: {}
 };
 
 var apiKey = lsGet(LS_APIKEY, DEFAULT_API_KEY) || "";
+var watchedMap = lsGet(LS_WATCHED, {});
+
 var channels = lsGet(LS_CHANNELS, null);
 if(!channels){
   channels = HARDCODED_CHANNELS.map(function(c){
     return {
-      id: null, // resolved on first update
-      rawInput: c.input,
-      label: c.label || c.input,
-      uploadsPlaylistId: null,
-      thumbnail: "",
-      lastUpdated: null,
-      videoCount: 0,
-      playlistCount: 0,
-      shortCount: 0,
-      error: null
+      id: null, rawInput: c.input, label: c.label || c.input, uploadsPlaylistId: null,
+      thumbnail: "", lastUpdated: null, videoCount: 0, playlistCount: 0, shortCount: 0, error: null
     };
   });
   lsSet(LS_CHANNELS, channels);
 }
 
 function saveChannels(){ lsSet(LS_CHANNELS, channels); }
+function saveWatched(){ lsSet(LS_WATCHED, watchedMap); }
 
 /* ---------------- UTIL ---------------- */
 function esc(s){
@@ -387,7 +371,6 @@ function timeAgo(iso){
 }
 
 function parseISODuration(iso){
-  // returns seconds
   if(!iso) return 0;
   var m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if(!m) return 0;
@@ -409,9 +392,7 @@ function showToast(msg, ms){
 var API_BASE = "https://www.googleapis.com/youtube/v3";
 
 function apiFetch(path, params){
-  if(!apiKey){
-    return Promise.reject(new Error("NO_API_KEY"));
-  }
+  if(!apiKey) return Promise.reject(new Error("NO_API_KEY"));
   var qs = Object.keys(params).map(function(k){
     return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
   }).join("&");
@@ -421,96 +402,104 @@ function apiFetch(path, params){
       return res.json().then(function(j){
         var reason = (j && j.error && j.error.errors && j.error.errors[0] && j.error.errors[0].reason) || res.status;
         throw new Error("API_ERROR:" + reason);
-      }, function(){
-        throw new Error("API_ERROR:" + res.status);
-      });
+      }, function(){ throw new Error("API_ERROR:" + res.status); });
     }
     return res.json();
   });
 }
 
-// Resolve a channel input (ID, @handle, URL, or username) to channel resource.
 function resolveChannel(rawInput){
   var input = rawInput.trim();
-  // Strip full URL forms
   var m;
-  if((m = input.match(/youtube\.com\/channel\/([A-Za-z0-9_-]+)/))){
-    input = m[1];
-  } else if((m = input.match(/youtube\.com\/@([A-Za-z0-9_.-]+)/))){
-    input = "@" + m[1];
-  } else if((m = input.match(/youtube\.com\/(?:c\/|user\/)([A-Za-z0-9_.-]+)/))){
-    input = m[1];
-  }
+  if((m = input.match(/youtube\.com\/channel\/([A-Za-z0-9_-]+)/))) input = m[1];
+  else if((m = input.match(/youtube\.com\/@([A-Za-z0-9_.-]+)/))) input = "@" + m[1];
+  else if((m = input.match(/youtube\.com\/(?:c\/|user\/)([A-Za-z0-9_.-]+)/))) input = m[1];
 
   if(/^UC[A-Za-z0-9_-]{20,}$/.test(input)){
-    return apiFetch("channels", { part:"snippet,contentDetails", id:input })
-      .then(pickChannel);
+    return apiFetch("channels", { part:"snippet,contentDetails", id:input }).then(pickChannel);
   }
   if(input.charAt(0) === "@"){
-    return apiFetch("channels", { part:"snippet,contentDetails", forHandle: input })
-      .then(pickChannel);
+    return apiFetch("channels", { part:"snippet,contentDetails", forHandle: input }).then(pickChannel);
   }
-  // Try as handle without @ first, then as legacy username
-  return apiFetch("channels", { part:"snippet,contentDetails", forHandle: "@" + input })
-    .then(pickChannel)
+  return apiFetch("channels", { part:"snippet,contentDetails", forHandle: "@" + input }).then(pickChannel)
     .catch(function(){
-      return apiFetch("channels", { part:"snippet,contentDetails", forUsername: input })
-        .then(pickChannel);
+      return apiFetch("channels", { part:"snippet,contentDetails", forUsername: input }).then(pickChannel);
     });
 
   function pickChannel(data){
     if(!data.items || !data.items.length) throw new Error("CHANNEL_NOT_FOUND");
     var it = data.items[0];
     return {
-      id: it.id,
-      title: it.snippet.title,
+      id: it.id, title: it.snippet.title,
       thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.default||{}).url) || "",
       uploadsPlaylistId: it.contentDetails.relatedPlaylists.uploads
     };
   }
 }
 
-// Fetch uploads playlist items (videos), up to cap, paging.
 function fetchUploads(uploadsPlaylistId, cap){
   var all = [];
   function page(pageToken){
     return apiFetch("playlistItems", {
-      part:"snippet,contentDetails",
-      playlistId: uploadsPlaylistId,
-      maxResults: PAGE_SIZE,
-      pageToken: pageToken || ""
+      part:"snippet,contentDetails", playlistId: uploadsPlaylistId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
     }).then(function(data){
       all = all.concat(data.items || []);
-      if(data.nextPageToken && all.length < cap){
-        return page(data.nextPageToken);
-      }
+      if(data.nextPageToken && all.length < cap) return page(data.nextPageToken);
       return all;
     });
   }
   return page();
 }
 
-// Fetch channel's playlists (excluding uploads itself), paging.
 function fetchPlaylists(channelId, cap){
   var all = [];
   function page(pageToken){
     return apiFetch("playlists", {
-      part:"snippet,contentDetails",
-      channelId: channelId,
-      maxResults: PAGE_SIZE,
-      pageToken: pageToken || ""
+      part:"snippet,contentDetails", channelId: channelId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
     }).then(function(data){
       all = all.concat(data.items || []);
-      if(data.nextPageToken && all.length < cap){
-        return page(data.nextPageToken);
-      }
+      if(data.nextPageToken && all.length < cap) return page(data.nextPageToken);
       return all;
     });
   }
   return page();
 }
 
-// Given video IDs, fetch contentDetails (duration) in batches of 50, 1 unit each.
+function fetchPlaylistVideos(playlistId) {
+  var all = [];
+  function page(pageToken){
+    return apiFetch("playlistItems", {
+      part: "snippet,contentDetails", playlistId: playlistId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
+    }).then(function(data){
+      all = all.concat(data.items || []);
+      if(data.nextPageToken && all.length < 300) return page(data.nextPageToken);
+      return all;
+    });
+  }
+  return page().then(function(items){
+     var videoIds = items.map(function(it){ return it.contentDetails.videoId; }).filter(Boolean);
+     if(!videoIds.length) return [];
+     return fetchVideoDurations(videoIds).then(function(durMap){
+       return items.map(function(it){
+          var vid = it.contentDetails.videoId;
+          return {
+            id: vid,
+            channelId: it.snippet.videoOwnerChannelId || "",
+            channelLabel: it.snippet.videoOwnerChannelTitle || "Unknown",
+            title: it.snippet.title,
+            publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
+            duration: durMap[vid] || 0,
+            type: "video",
+            url: "https://www.youtube.com/watch?v=" + vid
+          };
+       });
+     });
+  });
+}
+
 function fetchVideoDurations(videoIds){
   var chunks = [];
   for(var i=0;i<videoIds.length;i+=50){ chunks.push(videoIds.slice(i,i+50)); }
@@ -527,11 +516,9 @@ function fetchVideoDurations(videoIds){
   }, Promise.resolve()).then(function(){ return durMap; });
 }
 
-/* Full update pipeline for one channel */
 function updateChannel(chanMeta){
   state.updating[chanMeta.rawInput] = true;
   render();
-
   var resolvedPromise = chanMeta.id
     ? Promise.resolve({ id: chanMeta.id, title: chanMeta.label, thumbnail: chanMeta.thumbnail, uploadsPlaylistId: chanMeta.uploadsPlaylistId })
     : resolveChannel(chanMeta.rawInput);
@@ -548,34 +535,25 @@ function updateChannel(chanMeta){
         var videoRecords = items.map(function(it){
           var vid = it.contentDetails.videoId;
           var dur = durMap[vid] || 0;
-          var isShort = dur > 0 && dur <= 60;
           return {
-            id: vid,
-            channelId: resolved.id,
-            channelLabel: chanMeta.label,
-            title: it.snippet.title,
-            publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
+            id: vid, channelId: resolved.id, channelLabel: chanMeta.label,
+            title: it.snippet.title, publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
             thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default || {}).url) || "",
-            description: it.snippet.description || "",
-            duration: dur,
-            type: isShort ? "short" : "video",
+            description: it.snippet.description || "", duration: dur,
+            type: (dur > 0 && dur <= 60) ? "short" : "video",
             url: "https://www.youtube.com/watch?v=" + vid
           };
         });
         return fetchPlaylists(resolved.id, MAX_PER_CHANNEL_FETCH).then(function(plItems){
           var playlistRecords = plItems.map(function(pl){
             return {
-              id: pl.id,
-              channelId: resolved.id,
-              channelLabel: chanMeta.label,
-              title: pl.snippet.title,
-              publishedAt: pl.snippet.publishedAt,
+              id: pl.id, channelId: resolved.id, channelLabel: chanMeta.label,
+              title: pl.snippet.title, publishedAt: pl.snippet.publishedAt,
               thumbnail: (pl.snippet.thumbnails && (pl.snippet.thumbnails.medium || pl.snippet.thumbnails.default || {}).url) || "",
               itemCount: pl.contentDetails.itemCount,
               url: "https://www.youtube.com/playlist?list=" + pl.id
             };
           });
-          // success: replace this channel's cached data
           return idbDeleteByChannel("videos", resolved.id)
             .then(function(){ return idbDeleteByChannel("playlists", resolved.id); })
             .then(function(){ return idbPutAll("videos", videoRecords); })
@@ -603,14 +581,12 @@ function updateChannel(chanMeta){
   });
 }
 
-/* ---------------- DATA LOADERS (for rendering) ---------------- */
+/* ---------------- DATA LOADERS ---------------- */
 function loadHomeData(){
   return idbGetAll("videos").then(function(videos){
     return idbGetAll("playlists").then(function(playlists){
-      var vids = videos.filter(function(v){return v.type==="video";})
-        .sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
-      var shorts = videos.filter(function(v){return v.type==="short";})
-        .sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       state.homeData = { videos: vids, playlists: pls, shorts: shorts };
       render();
@@ -621,10 +597,8 @@ function loadHomeData(){
 function loadChannelData(chan){
   return idbGetAllByChannel("videos", chan.id).then(function(videos){
     return idbGetAllByChannel("playlists", chan.id).then(function(playlists){
-      var vids = videos.filter(function(v){return v.type==="video";})
-        .sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
-      var shorts = videos.filter(function(v){return v.type==="short";})
-        .sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       state.channelData = { videos: vids, playlists: pls, shorts: shorts };
       render();
@@ -635,14 +609,11 @@ function loadChannelData(chan){
 /* ---------------- NAVIGATION HELPERS ---------------- */
 function currentList(){
   if(state.screen === "home"){
+    if(state.homeTab === "channels") return channels;
     return state.homeData[state.homeTab] || [];
   }
-  if(state.screen === "channel"){
-    return state.channelData[state.channelTab] || [];
-  }
-  if(state.screen === "channelList"){
-    return channels;
-  }
+  if(state.screen === "channel") return state.channelData[state.channelTab] || [];
+  if(state.screen === "playlistDetail") return state.playlistData || [];
   return [];
 }
 
@@ -653,8 +624,9 @@ function goHome(){
   render();
 }
 
-function goChannelList(){
-  state.screen = "channelList";
+function goChannelsTab(){
+  state.screen = "home";
+  state.homeTab = "channels";
   state.focusIndex = 0;
   render();
 }
@@ -664,36 +636,40 @@ function openChannel(chan){
   state.currentChannel = chan;
   state.channelTab = "videos";
   state.focusIndex = 0;
-  if(chan.id){
-    loadChannelData(chan);
-  } else {
-    state.channelData = { videos:[], playlists:[], shorts:[] };
+  if(chan.id){ loadChannelData(chan); }
+  else { state.channelData = { videos:[], playlists:[], shorts:[] }; render(); }
+}
+
+function openPlaylistDetail(pl){
+  state.playlistSource = state.screen;
+  state.screen = "playlistDetail";
+  state.currentPlaylist = pl;
+  state.focusIndex = 0;
+  state.playlistData = [];
+  render();
+  showToast("Loading playlist...");
+  fetchPlaylistVideos(pl.id).then(function(videos){
+    state.playlistData = videos;
     render();
-  }
+  }).catch(function(e){ showToast("Failed to load playlist"); });
 }
 
-function openAddChannel(){
-  state.screen = "addChannel";
-  state.formFocus = 0;
-  state.formValues = { input:"", label:"" };
-  render();
+function openAddChannel(){ state.screen = "addChannel"; state.formFocus = 0; state.formValues = { input:"", label:"" }; render(); }
+function openSettings(){ state.screen = "settings"; state.formFocus = 0; state.formValues = { apiKey: apiKey }; render(); }
+function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; render(); }
+function openUrl(url){ window.open(url, "_blank"); }
+
+function doWatch(){
+  if(state.detailVideo) openUrl(state.detailVideo.url);
 }
 
-function openSettings(){
-  state.screen = "settings";
-  state.formFocus = 0;
-  state.formValues = { apiKey: apiKey };
-  render();
-}
-
-function openVideoDetail(v){
-  state.detailVideo = v;
-  state.screen = "videoDetail";
-  render();
-}
-
-function openUrl(url){
-  window.open(url, "_blank");
+function toggleWatched(){
+  if(!state.detailVideo) return;
+  var vid = state.detailVideo.id;
+  if(watchedMap[vid]) delete watchedMap[vid];
+  else watchedMap[vid] = true;
+  saveWatched();
+  renderContent();
 }
 
 /* ---------------- RENDER ---------------- */
@@ -705,16 +681,13 @@ var $skCenter = document.getElementById("sk-center");
 var $skRight = document.getElementById("sk-right");
 
 function render(){
-  renderHeader();
-  renderTabs();
-  renderContent();
-  renderSoftkeys();
+  renderHeader(); renderTabs(); renderContent(); renderSoftkeys();
 }
 
 function renderHeader(){
   var title = "TubeCat";
   if(state.screen === "channel" && state.currentChannel) title = state.currentChannel.label;
-  if(state.screen === "channelList") title = "Channels";
+  if(state.screen === "playlistDetail" && state.currentPlaylist) title = state.currentPlaylist.title;
   if(state.screen === "addChannel") title = "Add Channel";
   if(state.screen === "settings") title = "Settings";
   if(state.screen === "videoDetail") title = "Details";
@@ -723,16 +696,16 @@ function renderHeader(){
 
 function renderTabs(){
   if(state.screen === "home"){
-    var tabs = [["videos","Videos"],["playlists","Lists"],["shorts","Shorts"]];
+    var tabs = [["videos","Feed"],["playlists","Lists"],["channels","Chans"],["shorts","Shorts"]];
     $tabs.style.display = "flex";
-    $tabs.innerHTML = tabs.map(function(t){
-      return '<div class="tab' + (state.homeTab===t[0]?' active':'') + '">' + t[1] + '</div>';
+    $tabs.innerHTML = tabs.map(function(t, i){
+      return '<div class="tab' + (state.homeTab===t[0]?' active':'') + '">' + (i+1) + '.' + t[1] + '</div>';
     }).join("");
   } else if(state.screen === "channel"){
-    var tabs2 = [["videos","Videos"],["playlists","Lists"],["shorts","Shorts"]];
+    var tabs2 = [["videos","Feed"],["playlists","Lists"],["shorts","Shorts"]];
     $tabs.style.display = "flex";
-    $tabs.innerHTML = tabs2.map(function(t){
-      return '<div class="tab' + (state.channelTab===t[0]?' active':'') + '">' + t[1] + '</div>';
+    $tabs.innerHTML = tabs2.map(function(t, i){
+      return '<div class="tab' + (state.channelTab===t[0]?' active':'') + '">' + (i+1) + '.' + t[1] + '</div>';
     }).join("");
   } else {
     $tabs.style.display = "none";
@@ -741,16 +714,15 @@ function renderTabs(){
 
 function fmtVideoItem(v, focused){
   var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
+  var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
   return '<li class="item' + (focused?' focused':'') + '" data-kind="video" data-id="' + esc(v.id) + '">' +
-    badge + esc(v.title) +
+    watched + badge + esc(v.title) +
     '<span class="meta">' + esc(v.channelLabel||"") + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
     '</li>';
 }
 function fmtPlaylistItem(p, focused){
   return '<li class="item' + (focused?' focused':'') + '" data-kind="playlist" data-id="' + esc(p.id) + '">' +
-    esc(p.title) +
-    '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span>' +
-    '</li>';
+    esc(p.title) + '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
 }
 function fmtChannelItem(c, idx, focused){
   var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
@@ -762,8 +734,7 @@ function fmtChannelItem(c, idx, focused){
 
 function renderList(items, kind){
   if(!items.length){
-    var msg = "No data yet.";
-    if(kind === "channel") msg = "No channels yet. Press Add to get started.";
+    var msg = (kind === "channel") ? "No channels yet. Press Add to start." : "No data yet.";
     $content.innerHTML = '<div class="empty">' + msg + '</div>';
     return;
   }
@@ -785,15 +756,13 @@ function scrollFocusedIntoView(){
 }
 
 function renderContent(){
-  if(state.toast){
-    // toast handled as overlay below normal content, keep normal render then append
-  }
   if(state.screen === "home"){
-    renderList(currentList(), state.homeTab === "playlists" ? "playlist" : "video");
+    if(state.homeTab === "channels") renderList(channels, "channel");
+    else renderList(currentList(), state.homeTab === "playlists" ? "playlist" : "video");
   } else if(state.screen === "channel"){
     renderList(currentList(), state.channelTab === "playlists" ? "playlist" : "video");
-  } else if(state.screen === "channelList"){
-    renderList(channels, "channel");
+  } else if(state.screen === "playlistDetail"){
+    renderList(currentList(), "video");
   } else if(state.screen === "addChannel"){
     renderAddChannelForm();
   } else if(state.screen === "settings"){
@@ -801,14 +770,15 @@ function renderContent(){
   } else if(state.screen === "videoDetail"){
     renderVideoDetail();
   }
+  
+  // Toasts
+  var existing = document.querySelector(".toast");
+  if(existing) existing.remove();
   if(state.toast){
     var t = document.createElement("div");
     t.className = "toast";
     t.textContent = state.toast;
     document.getElementById("app").appendChild(t);
-  } else {
-    var existing = document.querySelector(".toast");
-    if(existing) existing.remove();
   }
 }
 
@@ -817,11 +787,10 @@ function renderAddChannelForm(){
   $content.innerHTML =
     '<div class="form-view">' +
     '<label>Channel ID, @handle, or URL</label>' +
-    '<input class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
-    '<div class="hint">e.g. @veritasium or UCHnyfMqiRRG1u-2MsSQLbXA</div>' +
+    '<input type="text" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
+    '<div class="hint">e.g. @veritasium or UCHnyfMqiRRG...</div>' +
     '<label>Label (optional)</label>' +
-    '<input class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
-    '<div class="hint">Use keypad to type into the selected field, OK to edit</div>' +
+    '<input type="text" class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
     '</div>';
 }
 
@@ -830,17 +799,25 @@ function renderSettingsForm(){
   $content.innerHTML =
     '<div class="form-view">' +
     '<label>YouTube Data API v3 Key</label>' +
-    '<input class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
-    '<div class="hint">Required for fetching channel data. Get one free from Google Cloud Console.</div>' +
+    '<input type="text" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
+    '<div class="hint">Type your key or upload a txt file below</div>' +
+    '<label style="margin-top:12px;">Upload API Key (.txt)</label>' +
+    '<input type="file" id="api-file" accept=".txt" style="display:block; width:100%; margin-top:5px; font-size:11px;" />' +
     '</div>';
 }
 
 function renderVideoDetail(){
   var v = state.detailVideo;
   if(!v){ $content.innerHTML = '<div class="empty">No item</div>'; return; }
-  var isPlaylist = !!v.itemCount || (v.url && v.url.indexOf("/playlist?") !== -1);
+  var isWatched = watchedMap[v.id];
+  
+  var btns = '<div style="margin-bottom:12px;">' +
+    '<button class="btn btn-watch" id="btn-watch">1. Watch</button>' +
+    '<button class="btn btn-watched" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
+    '</div>';
+
   $content.innerHTML =
-    '<div class="video-detail">' +
+    '<div class="video-detail">' + btns +
     '<h2>' + esc(v.title) + '</h2>' +
     '<div class="chan">' + esc(v.channelLabel||"") + '</div>' +
     (v.description ? '<div class="desc">' + esc(v.description.slice(0,600)) + '</div>' : '') +
@@ -849,45 +826,27 @@ function renderVideoDetail(){
 }
 
 function renderSoftkeys(){
-  $skLeft.textContent = "";
-  $skCenter.textContent = "";
-  $skRight.textContent = "";
-
+  $skLeft.textContent = ""; $skCenter.textContent = ""; $skRight.textContent = "";
   if(state.screen === "home"){
-    $skLeft.textContent = "Channels";
-    $skCenter.textContent = "Open";
-    $skRight.textContent = "Refresh all";
+    if(state.homeTab === "channels"){
+      $skLeft.textContent = "Add"; $skCenter.textContent = "Open"; $skRight.textContent = "Remove";
+    } else {
+      $skLeft.textContent = "Settings"; $skCenter.textContent = "Open"; $skRight.textContent = "Refresh all";
+    }
   } else if(state.screen === "channel"){
-    $skLeft.textContent = "Back";
-    $skCenter.textContent = "Open";
-    $skRight.textContent = "Update";
-  } else if(state.screen === "channelList"){
-    $skLeft.textContent = "Add";
-    $skCenter.textContent = "Open";
-    $skRight.textContent = "Remove";
+    $skLeft.textContent = "Back"; $skCenter.textContent = "Open"; $skRight.textContent = "Update";
+  } else if(state.screen === "playlistDetail"){
+    $skLeft.textContent = "Back"; $skCenter.textContent = "Open"; $skRight.textContent = "";
   } else if(state.screen === "addChannel"){
-    $skLeft.textContent = "Cancel";
-    $skCenter.textContent = "Edit field";
-    $skRight.textContent = "Save";
+    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Edit field"; $skRight.textContent = "Save";
   } else if(state.screen === "settings"){
-    $skLeft.textContent = "Cancel";
-    $skCenter.textContent = "Edit";
-    $skRight.textContent = "Save";
+    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Edit"; $skRight.textContent = "Save";
   } else if(state.screen === "videoDetail"){
-    $skLeft.textContent = "Back";
-    $skCenter.textContent = "Play";
-    $skRight.textContent = "";
+    $skLeft.textContent = "Back"; $skCenter.textContent = "Watch"; $skRight.textContent = "Watched";
   }
 }
 
 /* ---------------- INPUT HANDLING ---------------- */
-// Feature phones fire arrow keys + Enter for D-pad. We map:
-// ArrowUp/ArrowDown -> move focus in list
-// ArrowLeft/ArrowRight -> switch tab (home/channel) or move between screens
-// Enter -> softkey-center (select)
-// SoftLeft key code often maps to "SoftLeft"/F1, SoftRight to "SoftRight"/F2 in KaiOS.
-// We bind to key names where possible and also allow click/touch fallback.
-
 function moveFocus(delta){
   var list = currentList();
   if(!list.length) return;
@@ -895,88 +854,95 @@ function moveFocus(delta){
   renderContent();
 }
 
+function switchHomeTab(tabName){
+  state.homeTab = tabName; state.focusIndex = 0;
+  renderTabs(); renderContent(); renderSoftkeys();
+}
+
+function switchChannelTab(tabName){
+  state.channelTab = tabName; state.focusIndex = 0;
+  renderTabs(); renderContent(); renderSoftkeys();
+}
+
 function switchTab(delta){
-  var order = ["videos","playlists","shorts"];
   if(state.screen === "home"){
+    var order = ["videos","playlists","channels","shorts"];
     var i = order.indexOf(state.homeTab);
-    i = (i + delta + order.length) % order.length;
-    state.homeTab = order[i];
-    state.focusIndex = 0;
-    renderTabs(); renderContent();
+    switchHomeTab(order[(i + delta + order.length) % order.length]);
   } else if(state.screen === "channel"){
-    var j = order.indexOf(state.channelTab);
-    j = (j + delta + order.length) % order.length;
-    state.channelTab = order[j];
-    state.focusIndex = 0;
-    renderTabs(); renderContent();
+    var order2 = ["videos","playlists","shorts"];
+    var j = order2.indexOf(state.channelTab);
+    switchChannelTab(order2[(j + delta + order2.length) % order2.length]);
   }
 }
 
 function doCenterAction(){
-  if(state.screen === "home" || state.screen === "channel"){
-    var list = currentList();
-    var it = list[state.focusIndex];
+  var list = currentList();
+  var it = list[state.focusIndex];
+  
+  if(state.screen === "home"){
     if(!it) return;
-    if(state.channelTab === "playlists" || (state.screen==="home" && state.homeTab==="playlists")){
-      openUrl(it.url);
-    } else {
-      openVideoDetail(it);
-    }
-  } else if(state.screen === "channelList"){
-    var chan = channels[state.focusIndex];
-    if(chan) openChannel(chan);
+    if(state.homeTab === "channels") openChannel(it);
+    else if(state.homeTab === "playlists") openPlaylistDetail(it);
+    else openVideoDetail(it);
+  } else if(state.screen === "channel"){
+    if(!it) return;
+    if(state.channelTab === "playlists") openPlaylistDetail(it);
+    else openVideoDetail(it);
+  } else if(state.screen === "playlistDetail"){
+    if(it) openVideoDetail(it);
   } else if(state.screen === "addChannel" || state.screen === "settings"){
     editCurrentField();
   } else if(state.screen === "videoDetail"){
-    if(state.detailVideo) openUrl(state.detailVideo.url);
+    if(state.detailVideo) doWatch();
   }
 }
 
 function doLeftAction(){
   if(state.screen === "home"){
-    goChannelList();
+    if(state.homeTab === "channels") openAddChannel();
+    else openSettings();
   } else if(state.screen === "channel"){
     goHome();
-  } else if(state.screen === "channelList"){
-    openAddChannel();
+  } else if(state.screen === "playlistDetail"){
+    state.screen = state.playlistSource || "home";
+    render();
   } else if(state.screen === "addChannel" || state.screen === "settings"){
-    // cancel
-    if(channels.length){ goChannelList(); } else { goHome(); }
+    if(channels.length) goChannelsTab(); else goHome();
   } else if(state.screen === "videoDetail"){
-    // back to previous list screen
-    if(state.currentChannel){ state.screen = "channel"; } else { state.screen = "home"; }
+    state.screen = state.currentPlaylist ? "playlistDetail" : (state.currentChannel ? "channel" : "home");
     render();
   }
 }
 
 function doRightAction(){
   if(state.screen === "home"){
-    refreshAllChannels();
+    if(state.homeTab === "channels") removeCurrentChannel();
+    else refreshAllChannels();
   } else if(state.screen === "channel"){
     if(state.currentChannel){
+      if(!confirm("Update this channel?")) return;
       updateChannel(state.currentChannel).then(function(ok){
-        showToast(ok ? "Updated" : "Update failed, kept old data");
+        showToast(ok ? "Updated" : "Update failed");
         loadChannelData(state.currentChannel);
       });
     }
-  } else if(state.screen === "channelList"){
-    removeCurrentChannel();
   } else if(state.screen === "addChannel"){
     saveNewChannel();
   } else if(state.screen === "settings"){
     saveSettings();
+  } else if(state.screen === "videoDetail"){
+    toggleWatched();
   }
 }
 
 function editCurrentField(){
   if(state.screen === "addChannel"){
     var fldName = state.formFocus === 0 ? "input" : "label";
-    var current = state.formValues[fldName] || "";
-    var val = prompt(state.formFocus === 0 ? "Channel ID / @handle / URL" : "Label (optional)", current);
+    var val = prompt(state.formFocus === 0 ? "ID / @handle / URL" : "Label (optional)", state.formValues[fldName] || "");
     if(val !== null){ state.formValues[fldName] = val; renderContent(); }
   } else if(state.screen === "settings"){
-    var cur = state.formValues.apiKey || "";
-    var val2 = prompt("YouTube Data API v3 Key", cur);
+    var val2 = prompt("YouTube Data API v3 Key", state.formValues.apiKey || "");
     if(val2 !== null){ state.formValues.apiKey = val2; renderContent(); }
   }
 }
@@ -984,143 +950,125 @@ function editCurrentField(){
 function saveNewChannel(){
   var input = (state.formValues.input || "").trim();
   if(!input){ showToast("Enter a channel ID, handle, or URL"); return; }
-  var already = channels.some(function(c){ return c.rawInput === input; });
-  if(already){ showToast("Channel already added"); return; }
-  var newChan = {
-    id: null,
-    rawInput: input,
-    label: state.formValues.label || input,
-    uploadsPlaylistId: null,
-    thumbnail: "",
-    lastUpdated: null,
-    videoCount: 0,
-    playlistCount: 0,
-    shortCount: 0,
-    error: null
-  };
-  channels.push(newChan);
-  saveChannels();
-  goChannelList();
+  if(channels.some(function(c){ return c.rawInput === input; })){ showToast("Channel already added"); return; }
+  var newChan = { id:null, rawInput:input, label:state.formValues.label||input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null };
+  channels.push(newChan); saveChannels();
+  goChannelsTab();
   showToast("Fetching channel...");
-  updateChannel(newChan).then(function(ok){
-    showToast(ok ? ("Added " + newChan.label) : "Could not fetch channel");
-  });
+  updateChannel(newChan).then(function(ok){ showToast(ok ? ("Added " + newChan.label) : "Could not fetch channel"); });
 }
 
 function saveSettings(){
   apiKey = (state.formValues.apiKey || "").trim();
   lsSet(LS_APIKEY, apiKey);
   showToast("Settings saved");
-  if(channels.length){ goChannelList(); } else { goHome(); }
+  if(channels.length) goChannelsTab(); else goHome();
 }
 
 function removeCurrentChannel(){
   var idx = state.focusIndex;
   var chan = channels[idx];
-  if(!chan) return;
-  var yes = confirm('Remove channel "' + chan.label + '"? This deletes its cached videos.');
-  if(!yes) return;
+  if(!chan || !confirm('Remove channel "' + chan.label + '"? This deletes its cached videos.')) return;
   channels.splice(idx, 1);
   saveChannels();
   state.focusIndex = Math.max(0, Math.min(channels.length - 1, idx));
   if(chan.id){
-    idbDeleteByChannel("videos", chan.id).then(function(){
-      return idbDeleteByChannel("playlists", chan.id);
-    }).then(function(){
-      renderContent();
-      showToast("Channel removed");
-    });
-  } else {
-    renderContent();
-    showToast("Channel removed");
-  }
+    idbDeleteByChannel("videos", chan.id).then(function(){ return idbDeleteByChannel("playlists", chan.id); }).then(function(){ renderContent(); showToast("Removed"); });
+  } else { renderContent(); showToast("Removed"); }
 }
 
 function refreshAllChannels(){
   if(!channels.length){ showToast("No channels to update"); return; }
-  if(!apiKey){ showToast("Set API key in Settings first"); openSettings(); return; }
+  if(!apiKey){ showToast("Set API key in Settings"); openSettings(); return; }
+  if(!confirm("Are you sure you want to update all channels?")) return;
   showToast("Refreshing all channels...");
   var chain = Promise.resolve();
-  channels.forEach(function(c){
-    chain = chain.then(function(){ return updateChannel(c); });
-  });
-  chain.then(function(){
-    showToast("All channels refreshed");
-    loadHomeData();
-  });
+  channels.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
+  chain.then(function(){ showToast("All channels refreshed"); loadHomeData(); });
 }
 
 /* Key handling */
 document.addEventListener("keydown", function(e){
   var key = e.key;
   switch(key){
+    case "1":
+      if(state.screen === "home"){ e.preventDefault(); switchHomeTab("videos"); }
+      else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("videos"); }
+      else if(state.screen === "videoDetail"){ e.preventDefault(); doWatch(); }
+      break;
+    case "2":
+      if(state.screen === "home"){ e.preventDefault(); switchHomeTab("playlists"); }
+      else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("playlists"); }
+      else if(state.screen === "videoDetail"){ e.preventDefault(); toggleWatched(); }
+      break;
+    case "3":
+      if(state.screen === "home"){ e.preventDefault(); switchHomeTab("channels"); }
+      else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("shorts"); }
+      break;
+    case "4":
+      if(state.screen === "home"){ e.preventDefault(); switchHomeTab("shorts"); }
+      break;
     case "ArrowUp":
       e.preventDefault();
-      if(state.screen==="addChannel"||state.screen==="settings"){
-        state.formFocus = Math.max(0, state.formFocus - 1); renderContent();
-      } else { moveFocus(-1); }
+      if(state.screen==="addChannel"||state.screen==="settings"){ state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); } else { moveFocus(-1); }
       break;
     case "ArrowDown":
       e.preventDefault();
-      if(state.screen==="addChannel"){
-        state.formFocus = Math.min(1, state.formFocus + 1); renderContent();
-      } else if(state.screen==="settings"){
-        // only one field
-      } else { moveFocus(1); }
+      if(state.screen==="addChannel"){ state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); } else if(state.screen==="settings"){} else { moveFocus(1); }
       break;
-    case "ArrowLeft":
-      e.preventDefault();
-      switchTab(-1);
-      break;
-    case "ArrowRight":
-      e.preventDefault();
-      switchTab(1);
-      break;
-    case "Enter":
-      e.preventDefault();
-      doCenterAction();
-      break;
-    case "SoftLeft":
-    case "F1":
-      e.preventDefault();
-      doLeftAction();
-      break;
-    case "SoftRight":
-    case "F2":
-      e.preventDefault();
-      doRightAction();
-      break;
-    case "Backspace":
-      // KaiOS back button
-      if(state.screen !== "home"){ e.preventDefault(); doLeftAction(); }
-      break;
+    case "ArrowLeft": e.preventDefault(); switchTab(-1); break;
+    case "ArrowRight": e.preventDefault(); switchTab(1); break;
+    case "Enter": e.preventDefault(); doCenterAction(); break;
+    case "SoftLeft": case "F1": e.preventDefault(); doLeftAction(); break;
+    case "SoftRight": case "F2": e.preventDefault(); doRightAction(); break;
+    case "Backspace": if(state.screen !== "home"){ e.preventDefault(); doLeftAction(); } break;
   }
 });
 
-/* Click/touch fallback for testing in normal browsers */
+/* Click/touch fallback & File upload handler */
+$content.addEventListener("change", function(e){
+  if(e.target.id === "api-file"){
+    var file = e.target.files[0];
+    if(file){
+      var reader = new FileReader();
+      reader.onload = function(evt){
+        var text = evt.target.result.trim();
+        if(text){ state.formValues.apiKey = text; renderContent(); showToast("API Key loaded from file!"); }
+      };
+      reader.readAsText(file);
+    }
+  }
+});
+
 $content.addEventListener("click", function(e){
+  if(e.target.id === "btn-watch"){ doWatch(); return; }
+  if(e.target.id === "btn-watched"){ toggleWatched(); return; }
   var li = e.target.closest ? e.target.closest(".item") : null;
   if(!li) return;
+  
   var kind = li.getAttribute("data-kind");
   if(kind === "channel"){
     var idx = parseInt(li.getAttribute("data-idx"), 10);
-    state.focusIndex = idx;
-    openChannel(channels[idx]);
+    state.focusIndex = idx; openChannel(channels[idx]);
   } else {
-    var list = currentList();
     var domIdx = Array.prototype.indexOf.call(li.parentNode.children, li);
-    state.focusIndex = domIdx;
-    doCenterAction();
+    state.focusIndex = domIdx; doCenterAction();
   }
 });
+
 $tabs.addEventListener("click", function(e){
   var tab = e.target.closest ? e.target.closest(".tab") : null;
   if(!tab) return;
   var idx = Array.prototype.indexOf.call($tabs.children, tab);
-  var order = ["videos","playlists","shorts"];
-  if(state.screen === "home"){ state.homeTab = order[idx]; state.focusIndex=0; renderTabs(); renderContent(); }
-  else if(state.screen === "channel"){ state.channelTab = order[idx]; state.focusIndex=0; renderTabs(); renderContent(); }
+  if(state.screen === "home"){
+    var order = ["videos","playlists","channels","shorts"];
+    switchHomeTab(order[idx]);
+  } else if(state.screen === "channel"){
+    var order2 = ["videos","playlists","shorts"];
+    switchChannelTab(order2[idx]);
+  }
 });
+
 $skLeft.addEventListener("click", doLeftAction);
 $skCenter.addEventListener("click", doCenterAction);
 $skRight.addEventListener("click", doRightAction);
@@ -1130,41 +1078,28 @@ openDB().then(function(_db){
   db = _db;
   if(!apiKey){
     if(channels.length){
-      goChannelList();
-      showToast("Set your API key in Settings (long-press hint: use Left/Right on empty screens)");
+      goChannelsTab();
+      showToast("Set your API key in Settings (Left Softkey)");
     } else {
       openSettings();
     }
   } else {
     goHome();
-    // Kick off a background update for channels never updated / stale (>12h), sequentially.
     var stale = channels.filter(function(c){
       return !c.lastUpdated || (Date.now() - new Date(c.lastUpdated).getTime() > 12*3600*1000);
     });
     if(stale.length){
       var chain = Promise.resolve();
-      stale.forEach(function(c){
-        chain = chain.then(function(){ return updateChannel(c); });
-      });
+      stale.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
       chain.then(function(){ loadHomeData(); });
     }
   }
   render();
 }).catch(function(err){
-  document.getElementById("content").innerHTML = '<div class="empty">Storage error: IndexedDB unavailable on this device.</div>';
+  document.getElementById("content").innerHTML = '<div class="empty">Storage error: IndexedDB unavailable.</div>';
 });
 
-if("serviceWorker" in navigator){
-  window.addEventListener("load", function(){
-    navigator.serviceWorker.register("sw.js").catch(function(){ /* ignore on unsupported */ });
-  });
-}
-
-/* Expose a couple of things for quick manual testing in devtools */
-window.TubeCat = {
-  state: state, channels: channels, updateChannel: updateChannel,
-  openSettings: openSettings, openAddChannel: openAddChannel, goHome: goHome, goChannelList: goChannelList
-};
+if("serviceWorker" in navigator){ window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); }); }
 
 })();
 </script>
