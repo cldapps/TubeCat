@@ -759,10 +759,9 @@ function renderList(items, kind){
 }
 
 function scrollFocusedIntoView(){
-  var el = $content.querySelector(".focused"); // .item.focused, .fld.focused, .btn.focused
+  var el = $content.querySelector(".focused"); 
   if(el){
     if(el.scrollIntoView){ el.scrollIntoView({ block: "nearest" }); }
-    // Manually force DOM focus to block standard D-Pad traversal confusion
     if(typeof el.focus === 'function') { el.focus(); }
   }
 }
@@ -783,7 +782,6 @@ function renderContent(){
     renderVideoDetail();
   }
   
-  // Toasts
   var existing = document.querySelector(".toast");
   if(existing) existing.remove();
   if(state.toast){
@@ -793,7 +791,6 @@ function renderContent(){
     document.getElementById("app").appendChild(t);
   }
 
-  // Enforce Physical Dom Focus over CSS
   setTimeout(scrollFocusedIntoView, 0); 
 }
 
@@ -815,10 +812,13 @@ function renderSettingsForm(){
     '<div class="form-view">' +
     '<label>YouTube Data API v3 Key</label>' +
     '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
-    '<div class="hint">Type your key or upload a txt file below</div>' +
+    '<div class="hint">Type key or upload txt file below</div>' +
     '<label style="margin-top:12px;">Upload API Key (.txt)</label>' +
-    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===1?' focused':'') + '" id="btn-upload">Choose File</button>' +
+    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===1?' focused':'') + '" id="btn-upload">Choose API File</button>' +
     '<input type="file" id="api-file" accept=".txt" style="display:none;" />' +
+    '<label style="margin-top:12px;">Import Channels (.txt)</label>' +
+    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===2?' focused':'') + '" id="btn-import">Choose Chans File</button>' +
+    '<input type="file" id="channel-file" accept=".txt" style="display:none;" />' +
     '</div>';
 }
 
@@ -842,24 +842,26 @@ function renderVideoDetail(){
 }
 
 function renderSoftkeys(){
-  $skLeft.textContent = ""; $skCenter.textContent = ""; $skRight.textContent = "";
+  var l="", c="", r="";
   if(state.screen === "home"){
-    if(state.homeTab === "channels"){
-      $skLeft.textContent = "Add"; $skCenter.textContent = "Open"; $skRight.textContent = "Remove";
-    } else {
-      $skLeft.textContent = "Settings"; $skCenter.textContent = "Open"; $skRight.textContent = "Refresh all";
-    }
+    if(state.homeTab === "channels"){ l="Add"; c="Open"; r="Remove"; } 
+    else { l="Settings"; c="Open"; r="Refresh"; }
   } else if(state.screen === "channel"){
-    $skLeft.textContent = "Back"; $skCenter.textContent = "Open"; $skRight.textContent = "Update";
+    l="Back"; c="Open"; r="Update";
   } else if(state.screen === "playlistDetail"){
-    $skLeft.textContent = "Back"; $skCenter.textContent = "Open"; $skRight.textContent = "";
+    l="Back"; c="Open"; r="";
   } else if(state.screen === "addChannel"){
-    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Edit field"; $skRight.textContent = "Save";
+    l="Cancel"; c="Edit field"; r="Save";
   } else if(state.screen === "settings"){
-    $skLeft.textContent = "Cancel"; $skCenter.textContent = "Action"; $skRight.textContent = "Save";
+    l="Cancel"; c="Action"; r="Save";
   } else if(state.screen === "videoDetail"){
-    $skLeft.textContent = "Back"; $skCenter.textContent = "Select"; $skRight.textContent = "Watched";
+    l="Back"; c="Select"; r="Watched";
   }
+
+  // Prepending * and # so the user knows they can rely on the numpad alternatives
+  $skLeft.textContent = l ? ("*" + l) : "";
+  $skCenter.textContent = c;
+  $skRight.textContent = r ? ("#" + r) : "";
 }
 
 /* ---------------- INPUT HANDLING ---------------- */
@@ -911,7 +913,8 @@ function doCenterAction(){
     editCurrentField();
   } else if(state.screen === "settings"){
     if(state.formFocus === 0) { editCurrentField(); }
-    else { document.getElementById("api-file").click(); }
+    else if(state.formFocus === 1) { document.getElementById("api-file").click(); }
+    else if(state.formFocus === 2) { document.getElementById("channel-file").click(); }
   } else if(state.screen === "videoDetail"){
     if(state.detailVideo) {
       if(state.focusIndex === 0) doWatch();
@@ -1009,14 +1012,18 @@ function refreshAllChannels(){
   chain.then(function(){ showToast("All channels refreshed"); loadHomeData(); });
 }
 
-/* Key handling - With Feature Phone Fixes Applied */
+/* Key handling - With Feature Phone Fixes Applied + Numpad Fallbacks */
 document.addEventListener("keydown", function(e){
   var key = e.key;
   var code = e.keyCode || e.which;
 
-  // OS Mapping Fixes: Translating hardware specific keys and keyCodes to standard names
-  if (key === "SoftLeft" || key === "F1" || code === 112 || code === 135 || code === 21) key = "SoftLeft";
+  // OS Mapping Fixes: Force * and # to act as Left and Right softkeys if pressed
+  if (key === "*" || code === 170 || code === 56) key = "SoftLeft";
+  else if (key === "#" || code === 163 || code === 35) key = "SoftRight";
+  // OS Mapping Fixes: Standard hardware specific softkeys to standard names
+  else if (key === "SoftLeft" || key === "F1" || code === 112 || code === 135 || code === 21) key = "SoftLeft";
   else if (key === "SoftRight" || key === "F2" || code === 113 || code === 136 || code === 22) key = "SoftRight";
+  // D-Pad Fixes
   else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
   else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
   else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
@@ -1047,7 +1054,9 @@ document.addEventListener("keydown", function(e){
       if(state.screen === "home"){ e.preventDefault(); switchHomeTab("shorts"); }
       break;
     case "ArrowUp":
-      if(state.screen==="addChannel" || state.screen==="settings"){ 
+      if(state.screen==="addChannel"){ 
+        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
+      } else if (state.screen==="settings") {
         state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
       } else if (state.screen==="videoDetail") { 
         state.focusIndex = Math.max(0, state.focusIndex - 1); renderContent(); 
@@ -1056,8 +1065,10 @@ document.addEventListener("keydown", function(e){
       }
       break;
     case "ArrowDown":
-      if(state.screen==="addChannel" || state.screen==="settings"){ 
+      if(state.screen==="addChannel"){ 
         state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); 
+      } else if (state.screen==="settings") {
+        state.formFocus = Math.min(2, state.formFocus + 1); renderContent(); 
       } else if (state.screen==="videoDetail") { 
         state.focusIndex = Math.min(1, state.focusIndex + 1); renderContent(); 
       } else { 
@@ -1085,12 +1096,43 @@ $content.addEventListener("change", function(e){
       };
       reader.readAsText(file);
     }
+  } else if (e.target.id === "channel-file"){
+    var cFile = e.target.files[0];
+    if(cFile){
+      var cReader = new FileReader();
+      cReader.onload = function(evt){
+        var text = evt.target.result;
+        if(text){
+          var lines = text.split(/\r?\n/);
+          var added = 0;
+          lines.forEach(function(line){
+            var input = line.trim();
+            if(!input) return;
+            var exists = channels.some(function(c){ return c.rawInput === input; });
+            if(!exists){
+              channels.push({ id:null, rawInput:input, label:input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null });
+              added++;
+            }
+          });
+          if(added > 0){
+            saveChannels();
+            showToast("Imported " + added + " new channels!");
+          } else {
+            showToast("No new channels found.");
+          }
+        }
+      };
+      cReader.readAsText(cFile);
+    }
   }
 });
 
 $content.addEventListener("click", function(e){
   if(e.target.id === "btn-watch"){ doWatch(); return; }
   if(e.target.id === "btn-watched"){ toggleWatched(); return; }
+  if(e.target.id === "btn-upload"){ document.getElementById("api-file").click(); return; }
+  if(e.target.id === "btn-import"){ document.getElementById("channel-file").click(); return; }
+
   var li = e.target.closest ? e.target.closest(".item") : null;
   if(!li) return;
   
@@ -1127,7 +1169,7 @@ openDB().then(function(_db){
   if(!apiKey){
     if(channels.length){
       goChannelsTab();
-      showToast("Set your API key in Settings (Left Softkey)");
+      showToast("Set your API key in Settings");
     } else {
       openSettings();
     }
