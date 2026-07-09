@@ -1,0 +1,22 @@
+{
+  "name": "TubeCat",
+  "short_name": "TubeCat",
+  "description": "Personal YouTube channel catalog for feature phones",
+  "launch_path": "/index.html",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#0f0f0f",
+  "icons": {
+    "56": "/icon56.png",
+    "112": "/icon112.png"
+  },
+  "developer": {
+    "name": "TubeCat"
+  },
+  "type": "web",
+  "b2g_features": {
+    "developer_hidden": true
+  }
+}
