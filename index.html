@@ -1,8 +1,1325 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
+<title>TubeCat</title>
+<meta name="theme-color" content="#0f0f0f">
+<link rel="manifest" href="manifest.webapp">
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html,body {
+    margin:0; padding:0; width:100%; height:100%;
+    background:#000; color:#eee;
+    font-family: "Open Sans", Arial, Helvetica, sans-serif;
+    font-size: 13px;
+    overflow:hidden;
+  }
+  #app { display:flex; flex-direction:column; height:100vh; height:100dvh; position:relative; }
+
+  /* HEADER */
+  #header {
+    background:#1a1a1a;
+    color:#fff;
+    text-align:center;
+    padding:6px 4px;
+    font-weight:bold;
+    font-size:13px;
+    border-bottom:1px solid #333;
+    flex-shrink:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  /* TABS */
+  #tabs {
+    display:flex;
+    background:#151515;
+    border-bottom:1px solid #333;
+    flex-shrink:0;
+  }
+  #tabs .tab {
+    flex:1;
+    text-align:center;
+    padding:5px 2px;
+    font-size:11px;
+    color:#999;
+    border-bottom:2px solid transparent;
+  }
+  #tabs .tab.active {
+    color:#fff;
+    border-bottom:2px solid #e33;
+    font-weight:bold;
+  }
+
+  /* CONTENT */
+  #content {
+    flex:1;
+    overflow-y:auto;
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  #content::-webkit-scrollbar{ display:none; }
+
+  /* Removes device native cursor outlines to let our custom .focused style takeover cleanly */
+  .item:focus, .btn:focus, input:focus { outline: none; }
+
+  .list { list-style:none; margin:0; padding:0; }
+  .item {
+    padding:7px 6px;
+    border-bottom:1px solid #222;
+    font-size:12.5px;
+    line-height:1.35;
+    color:#ddd;
+  }
+  .item.focused {
+    background:#e33;
+    color:#fff;
+  }
+  .item .meta {
+    display:block;
+    font-size:10.5px;
+    color:#999;
+    margin-top:2px;
+  }
+  .item.focused .meta { color:#fdd; }
+
+  .item .badge {
+    display:inline-block;
+    font-size:9px;
+    padding:1px 4px;
+    border-radius:3px;
+    background:#333;
+    color:#aaa;
+    margin-right:4px;
+  }
+  .item.focused .badge { background:#a00; color:#fff; }
+
+  .empty {
+    padding:20px 10px;
+    text-align:center;
+    color:#777;
+    font-size:12px;
+  }
+
+  .channel-row {
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+  }
+  .channel-row .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* OPTIONS MENU (CLOUD PHONE GUIDELINES LSK) */
+  #options-menu {
+    position: absolute;
+    bottom: 23px; /* Just above softkeys */
+    left: 0; right: 0;
+    background: #111;
+    border-top: 2px solid #e33;
+    box-shadow: 0 -3px 10px rgba(0,0,0,0.7);
+    max-height: 60%;
+    overflow-y: auto;
+    display: none;
+    z-index: 100;
+  }
+  #options-menu.open { display: block; }
+  .opt-item {
+    padding: 10px 12px;
+    border-bottom: 1px solid #222;
+    color: #eee;
+    font-size: 13px;
+  }
+  .opt-item.focused { background: #e33; color: #fff; }
+
+  /* SOFTKEYS */
+  #softkeys {
+    display:flex;
+    justify-content:space-between;
+    background:#111;
+    border-top:1px solid #333;
+    padding:5px 8px;
+    font-size:11px;
+    color:#ccc;
+    flex-shrink:0;
+    z-index: 101;
+  }
+  #softkeys .sk { min-width:30%; text-align:center; }
+  #softkeys .sk.center { text-align:center; font-weight:bold; }
+  #softkeys .sk.right { text-align:right; }
+
+  /* FORM / MODAL VIEW */
+  .form-view { padding:10px 8px; }
+  .form-view label { display:block; font-size:11px; color:#999; margin-bottom:3px; }
+  .form-view input[type="text"] {
+    width:100%;
+    padding:6px;
+    font-size:13px;
+    background:#1a1a1a;
+    border:1px solid #444;
+    color:#fff;
+    margin-bottom:12px;
+    border-radius:2px;
+  }
+  .form-view input[type="text"].focused { border-color:#e33; background:#222; }
+  .form-view .hint { color:#777; font-size:10.5px; margin-top:-8px; margin-bottom:12px; }
+
+  .toast {
+    position:absolute;
+    bottom:34px;
+    left:8px;
+    right:8px;
+    background:#2a2a2a;
+    color:#fff;
+    font-size:11px;
+    padding:6px 8px;
+    border-radius:3px;
+    border:1px solid #444;
+    z-index:150;
+    text-align:center;
+  }
+
+  .video-detail {
+    padding:10px 8px;
+  }
+  .video-detail h2 {
+    font-size:14px;
+    margin:0 0 6px;
+    color:#fff;
+    line-height:1.3;
+  }
+  .video-detail .chan {
+    font-size:11px;
+    color:#bbb;
+    margin-bottom:8px;
+  }
+  .video-detail .desc {
+    font-size:11.5px;
+    color:#999;
+    line-height:1.4;
+    white-space:pre-wrap;
+    max-height: 40vh;
+    overflow-y:auto;
+  }
+  .video-detail .url {
+    margin-top:10px;
+    font-size:10px;
+    color:#777;
+    word-break:break-all;
+  }
+  
+  .btn {
+    display:block;
+    width:100%;
+    padding:8px;
+    border:none;
+    border-radius:3px;
+    font-size:12px;
+    font-weight:bold;
+    text-align:left;
+    margin-bottom:6px;
+  }
+  
+  .btn-upload { background:#222; color:#fff; text-align:center; margin-top:5px; }
+  .btn-upload.focused { background:#e33; border: 1px solid #fff; }
+  .btn-watch { background:#e33; color:#fff; }
+  .btn-watch.focused { background:#f55; border: 1px solid #fff; }
+  .btn-watched { background:#333; color:#fff; }
+  .btn-watched.focused { background:#555; border: 1px solid #fff; }
+
+  /* Red styling for watched state */
+  .btn-watched.watched-red { background:#e33 !important; color:#fff !important; }
+  .btn-watched.watched-red.focused { background:#f55 !important; border: 1px solid #fff; }
+
+  .iframe-container {
+    width: 100%;
+    margin-bottom: 12px;
+    background: #000;
+  }
+</style>
+</head>
 <body>
-  <a href="https://yout-ube.com/watch?v=azoJBzKawTs" target="_blank" rel="noopener noreferrer">
-    Open Video
-  </a>
+<div id="app">
+  <div id="header">TubeCat</div>
+  <div id="tabs"></div>
+  <div id="content"></div>
+  <div id="options-menu"></div>
+  <div id="softkeys">
+    <div class="sk left" id="sk-left"></div>
+    <div class="sk center" id="sk-center"></div>
+    <div class="sk right" id="sk-right"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* ---------------- CONFIG ---------------- */
+var DEFAULT_API_KEY = "";
+var HARDCODED_CHANNELS = [];
+var MAX_PER_CHANNEL_FETCH = 150;
+var PAGE_SIZE = 50;
+
+/* ---------------- STORAGE: localStorage ---------------- */
+var LS_CHANNELS = "tc_channels_v1";
+var LS_APIKEY   = "tc_apikey_v1";
+var LS_WATCHED  = "tc_watched_v1";
+
+function lsGet(key, fallback){
+  try {
+    var v = localStorage.getItem(key);
+    return v ? JSON.parse(v) : fallback;
+  } catch(e){ return fallback; }
+}
+function lsSet(key, val){
+  try { localStorage.setItem(key, JSON.stringify(val)); } catch(e){}
+}
+
+/* ---------------- STORAGE: IndexedDB ---------------- */
+var DB_NAME = "tubecat_db";
+var DB_VERSION = 1;
+var db = null;
+
+function openDB(){
+  return new Promise(function(resolve, reject){
+    var req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = function(e){
+      var _db = e.target.result;
+      if(!_db.objectStoreNames.contains("videos")){
+        var vs = _db.createObjectStore("videos", { keyPath: "id" });
+        vs.createIndex("channelId", "channelId", { unique:false });
+        vs.createIndex("type", "type", { unique:false });
+        vs.createIndex("publishedAt", "publishedAt", { unique:false });
+      }
+      if(!_db.objectStoreNames.contains("playlists")){
+        var ps = _db.createObjectStore("playlists", { keyPath:"id" });
+        ps.createIndex("channelId", "channelId", { unique:false });
+        ps.createIndex("publishedAt", "publishedAt", { unique:false });
+      }
+    };
+    req.onsuccess = function(e){ resolve(e.target.result); };
+    req.onerror = function(e){ reject(e); };
+  });
+}
+
+function idbPutAll(storeName, items){
+  return new Promise(function(resolve, reject){
+    if(!items.length) return resolve();
+    var tx = db.transaction(storeName, "readwrite");
+    var store = tx.objectStore(storeName);
+    items.forEach(function(it){ store.put(it); });
+    tx.oncomplete = function(){ resolve(); };
+    tx.onerror = function(e){ reject(e); };
+  });
+}
+
+function idbGetAllByChannel(storeName, channelId){
+  return new Promise(function(resolve, reject){
+    var tx = db.transaction(storeName, "readonly");
+    var store = tx.objectStore(storeName);
+    var idx = store.index("channelId");
+    var req = idx.getAll(IDBKeyRange.only(channelId));
+    req.onsuccess = function(){ resolve(req.result || []); };
+    req.onerror = function(e){ reject(e); };
+  });
+}
+
+function idbGetAll(storeName){
+  return new Promise(function(resolve, reject){
+    var tx = db.transaction(storeName, "readonly");
+    var store = tx.objectStore(storeName);
+    var req = store.getAll();
+    req.onsuccess = function(){ resolve(req.result || []); };
+    req.onerror = function(e){ reject(e); };
+  });
+}
+
+function idbDeleteByChannel(storeName, channelId){
+  return new Promise(function(resolve, reject){
+    var tx = db.transaction(storeName, "readwrite");
+    var store = tx.objectStore(storeName);
+    var idx = store.index("channelId");
+    var req = idx.openCursor(IDBKeyRange.only(channelId));
+    req.onsuccess = function(e){
+      var cursor = e.target.result;
+      if(cursor){ store.delete(cursor.primaryKey); cursor.continue(); }
+    };
+    tx.oncomplete = function(){ resolve(); };
+    tx.onerror = function(e){ reject(e); };
+  });
+}
+
+/* ---------------- STATE ---------------- */
+var state = {
+  screen: "home",         
+  homeTab: "videos",      
+  channelTab: "videos",   
+  focusIndex: 0,
+  currentChannel: null,
+  currentPlaylist: null,
+  playlistSource: null,   
+  playlistData: [],       
+  homeData: { videos:[], playlists:[], shorts:[] },
+  channelData: { videos:[], playlists:[], shorts:[] },
+  toast: null,
+  toastTimer: null,
+  formFocus: 0,
+  formValues: { input:"", label:"" },
+  detailVideo: null,
+  updating: {},
+  optionsMenu: { open: false, items: [], focusIndex: 0 }
+};
+
+var apiKey = lsGet(LS_APIKEY, DEFAULT_API_KEY) || "";
+var watchedMap = lsGet(LS_WATCHED, {});
+
+var channels = lsGet(LS_CHANNELS, null);
+if(!channels){
+  channels = HARDCODED_CHANNELS.map(function(c){
+    return {
+      id: null, rawInput: c.input, label: c.label || c.input, uploadsPlaylistId: null,
+      thumbnail: "", lastUpdated: null, videoCount: 0, playlistCount: 0, shortCount: 0, error: null
+    };
+  });
+  lsSet(LS_CHANNELS, channels);
+}
+
+function saveChannels(){ lsSet(LS_CHANNELS, channels); }
+function saveWatched(){ lsSet(LS_WATCHED, watchedMap); }
+
+/* ---------------- UTIL ---------------- */
+function esc(s){
+  if(s == null) return "";
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function timeAgo(iso){
+  if(!iso) return "never";
+  var diff = Date.now() - new Date(iso).getTime();
+  var mins = Math.floor(diff/60000);
+  if(mins < 1) return "just now";
+  if(mins < 60) return mins + "m ago";
+  var hrs = Math.floor(mins/60);
+  if(hrs < 24) return hrs + "h ago";
+  var days = Math.floor(hrs/24);
+  if(days < 30) return days + "d ago";
+  var months = Math.floor(days/30);
+  if(months < 12) return months + "mo ago";
+  return Math.floor(months/12) + "y ago";
+}
+
+function parseISODuration(iso){
+  if(!iso) return 0;
+  var m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if(!m) return 0;
+  var h = parseInt(m[1]||0,10), mi = parseInt(m[2]||0,10), s = parseInt(m[3]||0,10);
+  return h*3600 + mi*60 + s;
+}
+
+function showToast(msg, ms){
+  state.toast = msg;
+  render();
+  if(state.toastTimer) clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(function(){
+    state.toast = null;
+    render();
+  }, ms || 2200);
+}
+
+/* ---------------- YOUTUBE API ---------------- */
+var API_BASE = "https://www.googleapis.com/youtube/v3";
+
+function apiFetch(path, params){
+  if(!apiKey) return Promise.reject(new Error("NO_API_KEY"));
+  var qs = Object.keys(params).map(function(k){
+    return encodeURIComponent(k) + "=" + encodeURIComponent(params[k]);
+  }).join("&");
+  var url = API_BASE + "/" + path + "?" + qs + "&key=" + encodeURIComponent(apiKey);
+  return fetch(url).then(function(res){
+    if(!res.ok){
+      return res.json().then(function(j){
+        var reason = (j && j.error && j.error.errors && j.error.errors[0] && j.error.errors[0].reason) || res.status;
+        throw new Error("API_ERROR:" + reason);
+      }, function(){ throw new Error("API_ERROR:" + res.status); });
+    }
+    return res.json();
+  });
+}
+
+function resolveChannel(rawInput){
+  var input = rawInput.trim();
+  var m;
+  if((m = input.match(/youtube\.com\/channel\/([A-Za-z0-9_-]+)/))) input = m[1];
+  else if((m = input.match(/youtube\.com\/@([A-Za-z0-9_.-]+)/))) input = "@" + m[1];
+  else if((m = input.match(/youtube\.com\/(?:c\/|user\/)([A-Za-z0-9_.-]+)/))) input = m[1];
+
+  if(/^UC[A-Za-z0-9_-]{20,}$/.test(input)){
+    return apiFetch("channels", { part:"snippet,contentDetails", id:input }).then(pickChannel);
+  }
+  if(input.charAt(0) === "@"){
+    return apiFetch("channels", { part:"snippet,contentDetails", forHandle: input }).then(pickChannel);
+  }
+  return apiFetch("channels", { part:"snippet,contentDetails", forHandle: "@" + input }).then(pickChannel)
+    .catch(function(){
+      return apiFetch("channels", { part:"snippet,contentDetails", forUsername: input }).then(pickChannel);
+    });
+
+  function pickChannel(data){
+    if(!data.items || !data.items.length) throw new Error("CHANNEL_NOT_FOUND");
+    var it = data.items[0];
+    return {
+      id: it.id, title: it.snippet.title,
+      thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.default||{}).url) || "",
+      uploadsPlaylistId: it.contentDetails.relatedPlaylists.uploads
+    };
+  }
+}
+
+function fetchUploads(uploadsPlaylistId, cap){
+  var all = [];
+  function page(pageToken){
+    return apiFetch("playlistItems", {
+      part:"snippet,contentDetails", playlistId: uploadsPlaylistId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
+    }).then(function(data){
+      all = all.concat(data.items || []);
+      if(data.nextPageToken && all.length < cap) return page(data.nextPageToken);
+      return all;
+    });
+  }
+  return page();
+}
+
+function fetchPlaylists(channelId, cap){
+  var all = [];
+  function page(pageToken){
+    return apiFetch("playlists", {
+      part:"snippet,contentDetails", channelId: channelId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
+    }).then(function(data){
+      all = all.concat(data.items || []);
+      if(data.nextPageToken && all.length < cap) return page(data.nextPageToken);
+      return all;
+    });
+  }
+  return page();
+}
+
+function fetchPlaylistVideos(playlistId) {
+  var all = [];
+  function page(pageToken){
+    return apiFetch("playlistItems", {
+      part: "snippet,contentDetails", playlistId: playlistId,
+      maxResults: PAGE_SIZE, pageToken: pageToken || ""
+    }).then(function(data){
+      all = all.concat(data.items || []);
+      if(data.nextPageToken && all.length < 300) return page(data.nextPageToken);
+      return all;
+    });
+  }
+  return page().then(function(items){
+     var videoIds = items.map(function(it){ return it.contentDetails.videoId; }).filter(Boolean);
+     if(!videoIds.length) return [];
+     return fetchVideoDurations(videoIds).then(function(durMap){
+       return items.map(function(it){
+          var vid = it.contentDetails.videoId;
+          return {
+            id: vid,
+            channelId: it.snippet.videoOwnerChannelId || "",
+            channelLabel: it.snippet.videoOwnerChannelTitle || "Unknown",
+            title: it.snippet.title,
+            publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
+            duration: durMap[vid] || 0,
+            type: "video",
+            url: "https://www.youtube.com/watch?v=" + vid
+          };
+       });
+     });
+  });
+}
+
+function fetchVideoDurations(videoIds){
+  var chunks = [];
+  for(var i=0;i<videoIds.length;i+=50){ chunks.push(videoIds.slice(i,i+50)); }
+  var durMap = {};
+  return chunks.reduce(function(p, chunk){
+    return p.then(function(){
+      return apiFetch("videos", { part:"contentDetails", id: chunk.join(",") })
+        .then(function(data){
+          (data.items||[]).forEach(function(it){
+            durMap[it.id] = parseISODuration(it.contentDetails.duration);
+          });
+        });
+    });
+  }, Promise.resolve()).then(function(){ return durMap; });
+}
+
+function updateChannel(chanMeta){
+  state.updating[chanMeta.rawInput] = true;
+  render();
+  var resolvedPromise = chanMeta.id
+    ? Promise.resolve({ id: chanMeta.id, title: chanMeta.label, thumbnail: chanMeta.thumbnail, uploadsPlaylistId: chanMeta.uploadsPlaylistId })
+    : resolveChannel(chanMeta.rawInput);
+
+  return resolvedPromise.then(function(resolved){
+    chanMeta.id = resolved.id;
+    chanMeta.label = resolved.title || chanMeta.label;
+    chanMeta.thumbnail = resolved.thumbnail;
+    chanMeta.uploadsPlaylistId = resolved.uploadsPlaylistId;
+
+    return fetchUploads(resolved.uploadsPlaylistId, MAX_PER_CHANNEL_FETCH).then(function(items){
+      var videoIds = items.map(function(it){ return it.contentDetails.videoId; });
+      return fetchVideoDurations(videoIds).then(function(durMap){
+        var videoRecords = items.map(function(it){
+          var vid = it.contentDetails.videoId;
+          var dur = durMap[vid] || 0;
+          return {
+            id: vid, channelId: resolved.id, channelLabel: chanMeta.label,
+            title: it.snippet.title, publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
+            thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default || {}).url) || "",
+            description: it.snippet.description || "", duration: dur,
+            type: (dur > 0 && dur <= 60) ? "short" : "video",
+            url: "https://www.youtube.com/watch?v=" + vid
+          };
+        });
+        return fetchPlaylists(resolved.id, MAX_PER_CHANNEL_FETCH).then(function(plItems){
+          var playlistRecords = plItems.map(function(pl){
+            return {
+              id: pl.id, channelId: resolved.id, channelLabel: chanMeta.label,
+              title: pl.snippet.title, publishedAt: pl.snippet.publishedAt,
+              thumbnail: (pl.snippet.thumbnails && (pl.snippet.thumbnails.medium || pl.snippet.thumbnails.default || {}).url) || "",
+              itemCount: pl.contentDetails.itemCount,
+              url: "https://www.youtube.com/playlist?list=" + pl.id
+            };
+          });
+          return idbDeleteByChannel("videos", resolved.id)
+            .then(function(){ return idbDeleteByChannel("playlists", resolved.id); })
+            .then(function(){ return idbPutAll("videos", videoRecords); })
+            .then(function(){ return idbPutAll("playlists", playlistRecords); })
+            .then(function(){
+              chanMeta.lastUpdated = new Date().toISOString();
+              chanMeta.videoCount = videoRecords.filter(function(v){return v.type==="video";}).length;
+              chanMeta.shortCount = videoRecords.filter(function(v){return v.type==="short";}).length;
+              chanMeta.playlistCount = playlistRecords.length;
+              chanMeta.error = null;
+              saveChannels();
+              return true;
+            });
+        });
+      });
+    });
+  }).catch(function(err){
+    chanMeta.error = (err && err.message) || "update_failed";
+    saveChannels();
+    return false;
+  }).then(function(ok){
+    delete state.updating[chanMeta.rawInput];
+    render();
+    return ok;
+  });
+}
+
+/* ---------------- DATA LOADERS ---------------- */
+function loadHomeData(){
+  return idbGetAll("videos").then(function(videos){
+    return idbGetAll("playlists").then(function(playlists){
+      var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      state.homeData = { videos: vids, playlists: pls, shorts: shorts };
+      render();
+    });
+  });
+}
+
+function loadChannelData(chan){
+  return idbGetAllByChannel("videos", chan.id).then(function(videos){
+    return idbGetAllByChannel("playlists", chan.id).then(function(playlists){
+      var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      state.channelData = { videos: vids, playlists: pls, shorts: shorts };
+      render();
+    });
+  });
+}
+
+/* ---------------- NAVIGATION HELPERS ---------------- */
+function currentList(){
+  if(state.screen === "home"){
+    if(state.homeTab === "channels") return channels;
+    return state.homeData[state.homeTab] || [];
+  }
+  if(state.screen === "channel") return state.channelData[state.channelTab] || [];
+  if(state.screen === "playlistDetail") return state.playlistData || [];
+  return [];
+}
+
+function goHome(){
+  state.screen = "home";
+  state.focusIndex = 0;
+  closeOptions();
+  loadHomeData();
+  render();
+}
+
+function goChannelsTab(){
+  state.screen = "home";
+  state.homeTab = "channels";
+  state.focusIndex = 0;
+  closeOptions();
+  render();
+}
+
+function openChannel(chan){
+  state.screen = "channel";
+  state.currentChannel = chan;
+  state.channelTab = "videos";
+  state.focusIndex = 0;
+  closeOptions();
+  if(chan.id){ loadChannelData(chan); }
+  else { state.channelData = { videos:[], playlists:[], shorts:[] }; render(); }
+}
+
+function openPlaylistDetail(pl){
+  state.playlistSource = state.screen;
+  state.screen = "playlistDetail";
+  state.currentPlaylist = pl;
+  state.focusIndex = 0;
+  state.playlistData = [];
+  closeOptions();
+  render();
+  showToast("Loading playlist...");
+  fetchPlaylistVideos(pl.id).then(function(videos){
+    state.playlistData = videos;
+    render();
+  }).catch(function(e){ showToast("Failed to load playlist"); });
+}
+
+function openAddChannel(){ state.screen = "addChannel"; state.formFocus = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
+function openSettings(){ state.screen = "settings"; state.formFocus = 0; state.formValues = { apiKey: apiKey }; closeOptions(); render(); }
+function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; state.focusIndex = 0; closeOptions(); render(); }
+function openUrl(url){ window.open(url, "_blank"); }
+
+function doWatch(){
+  if(state.detailVideo) {
+    // Only alter youtube.com to yout-ube.com for this playback button URL
+    var modifiedUrl = state.detailVideo.url.replace(/youtube\.com/gi, "yout-ube.com").replace(/youtu\.be/gi, "yout-ube.com");
+    openUrl(modifiedUrl);
+  }
+}
+
+function toggleWatched(){
+  if(!state.detailVideo) return;
+  var vid = state.detailVideo.id;
+  if(watchedMap[vid]) delete watchedMap[vid];
+  else watchedMap[vid] = true;
+  saveWatched();
+  renderContent();
+}
+
+/* ---------------- OPTIONS MENU HELPERS ---------------- */
+function openOptions(items) {
+  state.optionsMenu.items = items;
+  state.optionsMenu.focusIndex = 0;
+  state.optionsMenu.open = true;
+  render();
+}
+
+function closeOptions() {
+  state.optionsMenu.open = false;
+  render();
+}
+
+/* ---------------- RENDER ---------------- */
+var $header = document.getElementById("header");
+var $tabs = document.getElementById("tabs");
+var $content = document.getElementById("content");
+var $skLeft = document.getElementById("sk-left");
+var $skCenter = document.getElementById("sk-center");
+var $skRight = document.getElementById("sk-right");
+
+function render(){
+  renderHeader(); 
+  renderTabs(); 
+  renderContent(); 
+  renderOptionsMenu();
+  renderSoftkeys();
+}
+
+function renderHeader(){
+  var title = "TubeCat";
+  if(state.screen === "channel" && state.currentChannel) title = state.currentChannel.label;
+  if(state.screen === "playlistDetail" && state.currentPlaylist) title = state.currentPlaylist.title;
+  if(state.screen === "addChannel") title = "Add Channel";
+  if(state.screen === "settings") title = "Settings";
+  if(state.screen === "videoDetail") title = "Details";
+  $header.textContent = title;
+}
+
+function renderTabs(){
+  if(state.screen === "home"){
+    var tabs = [["videos","Feed"],["playlists","Lists"],["channels","Chans"],["shorts","Shorts"]];
+    $tabs.style.display = "flex";
+    $tabs.innerHTML = tabs.map(function(t, i){
+      return '<div class="tab' + (state.homeTab===t[0]?' active':'') + '">' + (i+1) + '.' + t[1] + '</div>';
+    }).join("");
+  } else if(state.screen === "channel"){
+    var tabs2 = [["videos","Feed"],["playlists","Lists"],["shorts","Shorts"]];
+    $tabs.style.display = "flex";
+    $tabs.innerHTML = tabs2.map(function(t, i){
+      return '<div class="tab' + (state.channelTab===t[0]?' active':'') + '">' + (i+1) + '.' + t[1] + '</div>';
+    }).join("");
+  } else {
+    $tabs.style.display = "none";
+  }
+}
+
+function fmtVideoItem(v, focused){
+  var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
+  var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="video" data-id="' + esc(v.id) + '">' +
+    watched + badge + esc(v.title) +
+    '<span class="meta">' + esc(v.channelLabel||"") + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
+    '</li>';
+}
+function fmtPlaylistItem(p, focused){
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="playlist" data-id="' + esc(p.id) + '">' +
+    esc(p.title) + '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
+}
+function fmtChannelItem(c, idx, focused){
+  var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
+  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="channel" data-idx="' + idx + '">' +
+    '<div class="channel-row"><span class="name">' + esc(c.label) + '</span></div>' +
+    '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span>' +
+    '</li>';
+}
+
+function renderList(items, kind){
+  if(!items.length){
+    var msg = (kind === "channel") ? "No channels yet. Press Options -> Add to start." : "No data yet.";
+    $content.innerHTML = '<div class="empty">' + msg + '</div>';
+    return;
+  }
+  var html = '<ul class="list">';
+  items.forEach(function(it, i){
+    var focused = i === state.focusIndex;
+    if(kind === "video") html += fmtVideoItem(it, focused);
+    else if(kind === "playlist") html += fmtPlaylistItem(it, focused);
+    else if(kind === "channel") html += fmtChannelItem(it, i, focused);
+  });
+  html += "</ul>";
+  $content.innerHTML = html;
+}
+
+function scrollFocusedIntoView(){
+  // Targets elements only within main content to prevent options menu scrolling layout clashes
+  var el = $content.querySelector(".focused"); 
+  if(el){
+    if(el.scrollIntoView){ el.scrollIntoView({ block: "nearest" }); }
+    if(typeof el.focus === 'function') { el.focus(); }
+  }
+}
+
+function renderContent(){
+  if(state.screen === "home"){
+    if(state.homeTab === "channels") renderList(channels, "channel");
+    else renderList(currentList(), state.homeTab === "playlists" ? "playlist" : "video");
+  } else if(state.screen === "channel"){
+    renderList(currentList(), state.channelTab === "playlists" ? "playlist" : "video");
+  } else if(state.screen === "playlistDetail"){
+    renderList(currentList(), "video");
+  } else if(state.screen === "addChannel"){
+    renderAddChannelForm();
+  } else if(state.screen === "settings"){
+    renderSettingsForm();
+  } else if(state.screen === "videoDetail"){
+    renderVideoDetail();
+  }
+  
+  var existing = document.querySelector(".toast");
+  if(existing) existing.remove();
+  if(state.toast){
+    var t = document.createElement("div");
+    t.className = "toast";
+    t.textContent = state.toast;
+    document.getElementById("app").appendChild(t);
+  }
+
+  setTimeout(scrollFocusedIntoView, 0); 
+}
+
+function renderAddChannelForm(){
+  var f = state.formValues;
+  $content.innerHTML =
+    '<div class="form-view">' +
+    '<label>Channel ID, @handle, or URL</label>' +
+    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
+    '<div class="hint">e.g. @veritasium or UCHnyfMqiRRG...</div>' +
+    '<label>Label (optional)</label>' +
+    '<input type="text" tabindex="-1" class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
+    '</div>';
+}
+
+function renderSettingsForm(){
+  var f = state.formValues;
+  $content.innerHTML =
+    '<div class="form-view">' +
+    '<label>YouTube Data API v3 Key</label>' +
+    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
+    '<div class="hint">Type key or upload txt file below</div>' +
+    '<label style="margin-top:12px;">Upload API Key (.txt)</label>' +
+    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===1?' focused':'') + '" id="btn-upload">Choose API File</button>' +
+    '<input type="file" id="api-file" accept=".txt" style="display:none;" />' +
+    '<label style="margin-top:12px;">Import Channels (.txt)</label>' +
+    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===2?' focused':'') + '" id="btn-import">Choose Chans File</button>' +
+    '<input type="file" id="channel-file" accept=".txt" style="display:none;" />' +
+    '</div>';
+}
+
+function renderVideoDetail(){
+  var v = state.detailVideo;
+  if(!v){ $content.innerHTML = '<div class="empty">No item</div>'; return; }
+  var isWatched = watchedMap[v.id];
+  
+  var watchClass = "btn btn-watch" + (state.focusIndex === 0 ? " focused" : "");
+  var watchedClass = "btn btn-watched" + (isWatched ? " watched-red" : "") + (state.focusIndex === 1 ? " focused" : "");
+
+  var btns = '<div style="margin-bottom:12px;">' +
+    '<button tabindex="0" class="' + watchClass + '" id="btn-watch">1. Watch</button>' +
+    '<button tabindex="-1" class="' + watchedClass + '" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
+    '</div>';
+
+  // Embed iframe structure preserving standard Youtube URL for iframe
+  var iframeHtml = '<div class="iframe-container">' + 
+    '<iframe width="100%" height="140" src="https://www.youtube.com/embed/' + v.id + '" frameborder="0" allowfullscreen></iframe>' + 
+    '</div>';
+
+  $content.innerHTML =
+    '<div class="video-detail">' + btns + iframeHtml +
+    '<h2>' + esc(v.title) + '</h2>' +
+    '<div class="chan">' + esc(v.channelLabel||"") + '</div>' +
+    (v.description ? '<div class="desc">' + esc(v.description.slice(0,600)) + '</div>' : '') +
+    '<div class="url">' + esc(v.url) + '</div>' +
+    '</div>';
+}
+
+function renderOptionsMenu() {
+  var $menu = document.getElementById("options-menu");
+  if(!state.optionsMenu.open) {
+    $menu.classList.remove("open");
+    $menu.innerHTML = "";
+    return;
+  }
+  var html = "";
+  state.optionsMenu.items.forEach(function(item, i){
+    var focused = (i === state.optionsMenu.focusIndex) ? " focused" : "";
+    html += '<div class="opt-item' + focused + '">' + esc(item.label) + '</div>';
+  });
+  $menu.innerHTML = html;
+  $menu.classList.add("open");
+  
+  setTimeout(function(){
+    var el = $menu.querySelector(".focused");
+    if(el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+  }, 0);
+}
+
+function renderSoftkeys(){
+  // Defaults strictly applying Cloudfone Standards
+  var l="Options", c="", r="Back";
+
+  if(state.optionsMenu.open) {
+    l = ""; c = "Select"; r = "Cancel";
+  } else {
+    // History Back override mapped appropriately
+    if(state.screen === "home") r = "Exit";
+
+    // Center Action Mapping based on UI State
+    if(state.screen === "home" || state.screen === "channel" || state.screen === "playlistDetail"){
+      c = "Open";
+    } else if(state.screen === "addChannel" || state.screen === "settings") {
+      c = "Edit";
+    } else if(state.screen === "videoDetail") {
+      c = "Select";
+    }
+  }
+
+  $skLeft.textContent = l;
+  $skCenter.textContent = c;
+  $skRight.textContent = r;
+}
+
+/* ---------------- INPUT HANDLING ---------------- */
+function moveFocus(delta){
+  var list = currentList();
+  if(!list.length) return;
+  state.focusIndex = Math.max(0, Math.min(list.length - 1, state.focusIndex + delta));
+  renderContent();
+}
+
+function switchHomeTab(tabName){
+  state.homeTab = tabName; state.focusIndex = 0;
+  renderTabs(); renderContent(); renderSoftkeys();
+}
+
+function switchChannelTab(tabName){
+  state.channelTab = tabName; state.focusIndex = 0;
+  renderTabs(); renderContent(); renderSoftkeys();
+}
+
+function switchTab(delta){
+  if(state.optionsMenu.open) return; // Disable tab swap when options are overlaid
+  if(state.screen === "home"){
+    var order = ["videos","playlists","channels","shorts"];
+    var i = order.indexOf(state.homeTab);
+    switchHomeTab(order[(i + delta + order.length) % order.length]);
+  } else if(state.screen === "channel"){
+    var order2 = ["videos","playlists","shorts"];
+    var j = order2.indexOf(state.channelTab);
+    switchChannelTab(order2[(j + delta + order2.length) % order2.length]);
+  }
+}
+
+function doCenterAction(){
+  if(state.optionsMenu.open) {
+    var fn = state.optionsMenu.items[state.optionsMenu.focusIndex].action;
+    closeOptions();
+    if(typeof fn === "function") fn();
+    return;
+  }
+
+  var list = currentList();
+  var it = list[state.focusIndex];
+  
+  if(state.screen === "home"){
+    if(!it) return;
+    if(state.homeTab === "channels") openChannel(it);
+    else if(state.homeTab === "playlists") openPlaylistDetail(it);
+    else openVideoDetail(it);
+  } else if(state.screen === "channel"){
+    if(!it) return;
+    if(state.channelTab === "playlists") openPlaylistDetail(it);
+    else openVideoDetail(it);
+  } else if(state.screen === "playlistDetail"){
+    if(it) openVideoDetail(it);
+  } else if(state.screen === "addChannel" || state.screen === "settings"){
+    if(state.screen === "settings" && state.formFocus === 1) { document.getElementById("api-file").click(); }
+    else if(state.screen === "settings" && state.formFocus === 2) { document.getElementById("channel-file").click(); }
+    else { editCurrentField(); }
+  } else if(state.screen === "videoDetail"){
+    if(state.detailVideo) {
+      if(state.focusIndex === 0) doWatch();
+      else toggleWatched();
+    }
+  }
+}
+
+function doLeftAction(){
+  if(state.optionsMenu.open) return; // Do nothing if options are already open
+
+  var items = [];
+  if(state.screen === "home"){
+    if(state.homeTab === "channels"){
+      var chan = channels[state.focusIndex];
+      items.push({ label: "Add Channel", action: openAddChannel });
+      if(chan) {
+        items.push({ label: "Update Selected", action: function() { 
+          updateChannel(chan).then(function(ok){ showToast(ok ? "Updated" : "Update failed"); }); 
+        }});
+        items.push({ label: "Remove Selected", action: function() { removeChannelAt(state.focusIndex); }});
+      }
+      if(channels.length) items.push({ label: "Refresh All", action: refreshAllChannels });
+    } else {
+      items.push({ label: "Refresh All", action: refreshAllChannels });
+    }
+    items.push({ label: "Settings", action: openSettings });
+  } else if(state.screen === "channel"){
+    items.push({ label: "Update This Channel", action: function(){
+      if(state.currentChannel){
+         updateChannel(state.currentChannel).then(function(ok){
+           showToast(ok ? "Updated" : "Update failed");
+           loadChannelData(state.currentChannel);
+         });
+      }
+    }});
+    items.push({ label: "Remove Channel", action: function(){
+      var idx = channels.findIndex(function(c) { return c === state.currentChannel; });
+      if(idx !== -1) { removeChannelAt(idx); goHome(); }
+    }});
+    items.push({ label: "Settings", action: openSettings });
+  } else if(state.screen === "playlistDetail"){
+    items.push({ label: "Settings", action: openSettings });
+  } else if(state.screen === "addChannel"){
+    items.push({ label: "Save Channel", action: saveNewChannel });
+  } else if(state.screen === "settings"){
+    items.push({ label: "Save Settings", action: saveSettings });
+    items.push({ label: "Choose API Key (.txt)", action: function(){ document.getElementById("api-file").click(); } });
+    items.push({ label: "Import Channels (.txt)", action: function(){ document.getElementById("channel-file").click(); } });
+  } else if(state.screen === "videoDetail"){
+    items.push({ label: "Watch (yout-ube.com)", action: doWatch });
+    items.push({ label: (watchedMap[state.detailVideo.id] ? "Mark Unwatched" : "Mark Watched"), action: toggleWatched });
+    items.push({ label: "Settings", action: openSettings });
+  }
+
+  if(items.length > 0) openOptions(items);
+}
+
+function doRightAction(){
+  if(state.optionsMenu.open) {
+    closeOptions();
+    return;
+  }
+  
+  // Strict Cloudfone Pattern - Right Soft Key is ALWAYS History Back 
+  if(state.screen === "home"){
+    showToast("To exit, press Home button");
+  } else if(state.screen === "channel"){
+    goHome();
+  } else if(state.screen === "playlistDetail"){
+    state.screen = state.playlistSource || "home";
+    render();
+  } else if(state.screen === "addChannel" || state.screen === "settings"){
+    if(channels.length) goChannelsTab(); else goHome();
+  } else if(state.screen === "videoDetail"){
+    state.screen = state.currentPlaylist ? "playlistDetail" : (state.currentChannel ? "channel" : "home");
+    render();
+  }
+}
+
+function editCurrentField(){
+  if(state.screen === "addChannel"){
+    var fldName = state.formFocus === 0 ? "input" : "label";
+    var val = prompt(state.formFocus === 0 ? "ID / @handle / URL" : "Label (optional)", state.formValues[fldName] || "");
+    if(val !== null){ state.formValues[fldName] = val; renderContent(); }
+  } else if(state.screen === "settings"){
+    var val2 = prompt("YouTube Data API v3 Key", state.formValues.apiKey || "");
+    if(val2 !== null){ state.formValues.apiKey = val2; renderContent(); }
+  }
+}
+
+function saveNewChannel(){
+  var input = (state.formValues.input || "").trim();
+  if(!input){ showToast("Enter a channel ID, handle, or URL"); return; }
+  if(channels.some(function(c){ return c.rawInput === input; })){ showToast("Channel already added"); return; }
+  var newChan = { id:null, rawInput:input, label:state.formValues.label||input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null };
+  channels.push(newChan); saveChannels();
+  goChannelsTab();
+  showToast("Fetching channel...");
+  updateChannel(newChan).then(function(ok){ showToast(ok ? ("Added " + newChan.label) : "Could not fetch channel"); });
+}
+
+function saveSettings(){
+  apiKey = (state.formValues.apiKey || "").trim();
+  lsSet(LS_APIKEY, apiKey);
+  showToast("Settings saved");
+  if(channels.length) goChannelsTab(); else goHome();
+}
+
+function removeChannelAt(idx){
+  var chan = channels[idx];
+  if(!chan || !confirm('Remove channel "' + chan.label + '"? This deletes its cached videos.')) return;
+  channels.splice(idx, 1);
+  saveChannels();
+  state.focusIndex = Math.max(0, Math.min(channels.length - 1, idx));
+  if(chan.id){
+    idbDeleteByChannel("videos", chan.id).then(function(){ return idbDeleteByChannel("playlists", chan.id); }).then(function(){ renderContent(); showToast("Removed"); });
+  } else { renderContent(); showToast("Removed"); }
+}
+
+function refreshAllChannels(){
+  if(!channels.length){ showToast("No channels to update"); return; }
+  if(!apiKey){ showToast("Set API key in Settings"); openSettings(); return; }
+  if(!confirm("Are you sure you want to update all channels?")) return;
+  showToast("Refreshing all channels...");
+  var chain = Promise.resolve();
+  channels.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
+  chain.then(function(){ showToast("All channels refreshed"); loadHomeData(); });
+}
+
+/* Key handling - With Feature Phone Fixes Applied + Numpad Fallbacks */
+document.addEventListener("keydown", function(e){
+  var key = e.key;
+  var code = e.keyCode || e.which;
+
+  // OS Mapping Fixes: Standard hardware specific softkeys to standard names
+  if (key === "SoftLeft" || key === "F1" || code === 112 || code === 135 || code === 21) key = "SoftLeft";
+  else if (key === "SoftRight" || key === "F2" || code === 113 || code === 136 || code === 22) key = "SoftRight";
+  // D-Pad Fixes
+  else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
+  else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
+  else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
+  else if (key === "ArrowRight" || key === "Right" || code === 39) key = "ArrowRight";
+  else if (key === "Enter" || code === 13) key = "Enter";
+  else if (key === "Backspace" || key === "BrowserBack" || code === 8 || code === 4 || code === 27) key = "Backspace";
+
+  var navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "SoftLeft", "SoftRight", "Enter"];
+  if(navKeys.indexOf(key) !== -1) { e.preventDefault(); }
+
+  switch(key){
+    case "1":
+      if(!state.optionsMenu.open) {
+        if(state.screen === "home"){ e.preventDefault(); switchHomeTab("videos"); }
+        else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("videos"); }
+        else if(state.screen === "videoDetail"){ e.preventDefault(); doWatch(); }
+      }
+      break;
+    case "2":
+      if(!state.optionsMenu.open) {
+        if(state.screen === "home"){ e.preventDefault(); switchHomeTab("playlists"); }
+        else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("playlists"); }
+        else if(state.screen === "videoDetail"){ e.preventDefault(); toggleWatched(); }
+      }
+      break;
+    case "3":
+      if(!state.optionsMenu.open) {
+        if(state.screen === "home"){ e.preventDefault(); switchHomeTab("channels"); }
+        else if(state.screen === "channel"){ e.preventDefault(); switchChannelTab("shorts"); }
+      }
+      break;
+    case "4":
+      if(!state.optionsMenu.open && state.screen === "home"){ e.preventDefault(); switchHomeTab("shorts"); }
+      break;
+    case "ArrowUp":
+      if(state.optionsMenu.open) {
+        state.optionsMenu.focusIndex = Math.max(0, state.optionsMenu.focusIndex - 1); renderOptionsMenu();
+      } else if(state.screen==="addChannel"){ 
+        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
+      } else if (state.screen==="settings") {
+        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
+      } else if (state.screen==="videoDetail") { 
+        state.focusIndex = Math.max(0, state.focusIndex - 1); renderContent(); 
+      } else { moveFocus(-1); }
+      break;
+    case "ArrowDown":
+      if(state.optionsMenu.open) {
+        state.optionsMenu.focusIndex = Math.min(state.optionsMenu.items.length - 1, state.optionsMenu.focusIndex + 1); renderOptionsMenu();
+      } else if(state.screen==="addChannel"){ 
+        state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); 
+      } else if (state.screen==="settings") {
+        state.formFocus = Math.min(2, state.formFocus + 1); renderContent(); 
+      } else if (state.screen==="videoDetail") { 
+        state.focusIndex = Math.min(1, state.focusIndex + 1); renderContent(); 
+      } else { moveFocus(1); }
+      break;
+    case "ArrowLeft": switchTab(-1); break;
+    case "ArrowRight": switchTab(1); break;
+    case "Enter": doCenterAction(); break;
+    case "SoftLeft": doLeftAction(); break;
+    case "SoftRight": doRightAction(); break;
+    case "Backspace": e.preventDefault(); doRightAction(); break; // Cloudfone mapping RSK strictly to backspace behavior
+  }
+});
+
+/* Click/touch fallback & File upload handler */
+$content.addEventListener("change", function(e){
+  if(e.target.id === "api-file"){
+    var file = e.target.files[0];
+    if(file){
+      var reader = new FileReader();
+      reader.onload = function(evt){
+        var text = evt.target.result.trim();
+        if(text){ state.formValues.apiKey = text; renderContent(); showToast("API Key loaded from file!"); }
+      };
+      reader.readAsText(file);
+    }
+  } else if (e.target.id === "channel-file"){
+    var cFile = e.target.files[0];
+    if(cFile){
+      var cReader = new FileReader();
+      cReader.onload = function(evt){
+        var text = evt.target.result;
+        if(text){
+          var lines = text.split(/\r?\n/);
+          var added = 0;
+          lines.forEach(function(line){
+            var input = line.trim();
+            if(!input) return;
+            var exists = channels.some(function(c){ return c.rawInput === input; });
+            if(!exists){
+              channels.push({ id:null, rawInput:input, label:input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null });
+              added++;
+            }
+          });
+          if(added > 0){
+            saveChannels();
+            showToast("Imported " + added + " new channels!");
+          } else {
+            showToast("No new channels found.");
+          }
+        }
+      };
+      cReader.readAsText(cFile);
+    }
+  }
+});
+
+$content.addEventListener("click", function(e){
+  if(e.target.id === "btn-watch"){ doWatch(); return; }
+  if(e.target.id === "btn-watched"){ toggleWatched(); return; }
+  if(e.target.id === "btn-upload"){ document.getElementById("api-file").click(); return; }
+  if(e.target.id === "btn-import"){ document.getElementById("channel-file").click(); return; }
+
+  var li = e.target.closest ? e.target.closest(".item") : null;
+  if(!li) return;
+  
+  var kind = li.getAttribute("data-kind");
+  if(kind === "channel"){
+    var idx = parseInt(li.getAttribute("data-idx"), 10);
+    state.focusIndex = idx; openChannel(channels[idx]);
+  } else {
+    var domIdx = Array.prototype.indexOf.call(li.parentNode.children, li);
+    state.focusIndex = domIdx; doCenterAction();
+  }
+});
+
+$tabs.addEventListener("click", function(e){
+  var tab = e.target.closest ? e.target.closest(".tab") : null;
+  if(!tab) return;
+  var idx = Array.prototype.indexOf.call($tabs.children, tab);
+  if(state.screen === "home"){
+    var order = ["videos","playlists","channels","shorts"];
+    switchHomeTab(order[idx]);
+  } else if(state.screen === "channel"){
+    var order2 = ["videos","playlists","shorts"];
+    switchChannelTab(order2[idx]);
+  }
+});
+
+$skLeft.addEventListener("click", doLeftAction);
+$skCenter.addEventListener("click", doCenterAction);
+$skRight.addEventListener("click", doRightAction);
+
+/* ---------------- INIT ---------------- */
+openDB().then(function(_db){
+  db = _db;
+  if(!apiKey){
+    if(channels.length){
+      goChannelsTab();
+      showToast("Set your API key in Settings");
+    } else {
+      openSettings();
+    }
+  } else {
+    goHome();
+    var stale = channels.filter(function(c){
+      return !c.lastUpdated || (Date.now() - new Date(c.lastUpdated).getTime() > 12*3600*1000);
+    });
+    if(stale.length){
+      var chain = Promise.resolve();
+      stale.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
+      chain.then(function(){ loadHomeData(); });
+    }
+  }
+  render();
+}).catch(function(err){
+  document.getElementById("content").innerHTML = '<div class="empty">Storage error: IndexedDB unavailable.</div>';
+});
+
+if("serviceWorker" in navigator){ window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); }); }
+
+})();
+</script>
 </body>
 </html>
