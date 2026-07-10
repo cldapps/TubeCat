@@ -1072,7 +1072,7 @@ function doRightAction(){
     return;
   }
   
-  // Strict Cloudfone Pattern - Right Soft Key is ALWAYS History Back 
+  // Strict Cloudfone Pattern - Right Soft Key is ALWAYS History Back (or exit)
   if(state.screen === "home"){
     showToast("To exit, press Home button");
   } else if(state.screen === "channel"){
@@ -1138,21 +1138,33 @@ function refreshAllChannels(){
   chain.then(function(){ showToast("All channels refreshed"); loadHomeData(); });
 }
 
-/* Key handling - With Feature Phone Fixes Applied + Numpad Fallbacks */
+/* ============================================================
+   CloudMosa Device Listeners 
+   ============================================================ */
+
+/* 1. CloudMosa specific RSK (Right Soft Key) handler */
+window.addEventListener("back", function(e){
+  e.preventDefault(); // Stop default browser back navigation
+  doRightAction();    // Route to the app's internal back/cancel logic
+});
+
+/* 2. Key handling - With CloudMosa LSK (Escape) + Fallbacks */
 document.addEventListener("keydown", function(e){
   var key = e.key;
   var code = e.keyCode || e.which;
 
-  // OS Mapping Fixes: Standard hardware specific softkeys to standard names
-  if (key === "SoftLeft" || key === "F1" || code === 112 || code === 135 || code === 21) key = "SoftLeft";
-  else if (key === "SoftRight" || key === "F2" || code === 113 || code === 136 || code === 22) key = "SoftRight";
+  // CloudMosa LSK is Escape (code 27). Fallback to '*' for testing in standard browsers.
+  if (key === "Escape" || code === 27 || key === "*") key = "SoftLeft";
+  // Right Soft Key fallback for standard browser testing
+  else if (key === "#") key = "SoftRight";
   // D-Pad Fixes
   else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
   else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
   else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
   else if (key === "ArrowRight" || key === "Right" || code === 39) key = "ArrowRight";
   else if (key === "Enter" || code === 13) key = "Enter";
-  else if (key === "Backspace" || key === "BrowserBack" || code === 8 || code === 4 || code === 27) key = "Backspace";
+  // Keeping Backspace mapped to BrowserBack just in case it's triggered inside a web test emulator
+  else if (key === "Backspace" || key === "BrowserBack" || code === 8) key = "Backspace";
 
   var navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "SoftLeft", "SoftRight", "Enter"];
   if(navKeys.indexOf(key) !== -1) { e.preventDefault(); }
@@ -1206,9 +1218,15 @@ document.addEventListener("keydown", function(e){
     case "ArrowLeft": switchTab(-1); break;
     case "ArrowRight": switchTab(1); break;
     case "Enter": doCenterAction(); break;
+    
+    // CloudMosa LSK Mapping Trigger (Escape / *)
     case "SoftLeft": doLeftAction(); break;
+    
+    // Right Soft Key fallback Trigger (#)
     case "SoftRight": doRightAction(); break;
-    case "Backspace": e.preventDefault(); doRightAction(); break; // Cloudfone mapping RSK strictly to backspace behavior
+    
+    // Secondary fallback for Back functionality in web emulators
+    case "Backspace": e.preventDefault(); doRightAction(); break; 
   }
 });
 
