@@ -106,13 +106,37 @@
     color:#fff;
   }
   .item .thumb {
-    width:44px; height:44px; border-radius:3px;
+    width:32px; height:32px; border-radius:3px;
     margin-right:8px; object-fit:cover; flex-shrink:0;
     background:#222;
   }
   .item .thumb.round { border-radius:50%; width:26px; height:26px; }
   .item .info { flex:1; overflow:hidden; }
-  .item .title-line { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .item .title-line {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  /* Marquee only runs on the focused item, so we're not animating a
+     whole screenful of off-screen text at once on a low-power device. */
+  .item.focused .title-line {
+    text-overflow:clip;
+  }
+  .item.focused .title-line.marquee {
+    display:block;
+  }
+  .item.focused .title-line.marquee .marquee-track {
+    display:inline-block;
+    white-space:nowrap;
+    animation: tc-marquee 7s linear infinite;
+    animation-delay: 1s;
+    padding-right:40px; /* gap before it loops back */
+  }
+  @keyframes tc-marquee {
+    0%   { transform: translateX(0); }
+    15%  { transform: translateX(0); }        /* brief pause so the start is readable */
+    75%  { transform: translateX(var(--tc-marquee-shift, -100%)); }
+    92%  { transform: translateX(var(--tc-marquee-shift, -100%)); } /* hold at the end before looping */
+    100% { transform: translateX(0); }
+  }
   .item .meta {
     display:block;
     font-size:10.5px;
@@ -1001,10 +1025,45 @@ function updateFocusDOM() {
     } else {
       el.classList.remove("focused");
       if(el.tagName === "INPUT") el.blur();
+      unmarqueeTitle(el);
     }
   }
-  
+
+  applyMarquee(focusables[state.focusIndex]);
   setTimeout(updateScrollbar, 20); 
+}
+
+/* Only the focused item's title scrolls, and only if it's actually
+   too long to fit - this keeps the animation cost to a single element
+   at a time rather than animating every off-screen row. */
+function applyMarquee(el){
+  if(!el) return;
+  var titleEl = el.querySelector ? el.querySelector(".title-line") : null;
+  if(!titleEl) return;
+
+  // Already set up for this element; leave it running.
+  if(titleEl.querySelector(".marquee-track")) return;
+
+  var overflow = titleEl.scrollWidth - titleEl.clientWidth;
+  if(overflow <= 2) return; // fits fine, no scroll needed
+
+  var track = document.createElement("span");
+  track.className = "marquee-track";
+  track.innerHTML = titleEl.innerHTML;
+  titleEl.innerHTML = "";
+  titleEl.appendChild(track);
+  titleEl.classList.add("marquee");
+  titleEl.style.setProperty("--tc-marquee-shift", "-" + (overflow + 40) + "px");
+}
+
+function unmarqueeTitle(el){
+  var titleEl = el.querySelector ? el.querySelector(".title-line") : null;
+  if(!titleEl) return;
+  var track = titleEl.querySelector(".marquee-track");
+  if(!track) return;
+  titleEl.innerHTML = track.innerHTML;
+  titleEl.classList.remove("marquee");
+  titleEl.style.removeProperty("--tc-marquee-shift");
 }
 
 /* ---------------- RENDER ---------------- */
