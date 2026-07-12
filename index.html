@@ -30,6 +30,19 @@
     white-space:nowrap;
     overflow:hidden;
     text-overflow:ellipsis;
+    position:relative;
+  }
+  #header-count {
+    position:absolute;
+    right:6px;
+    top:50%;
+    transform:translateY(-50%);
+    font-size:8px;
+    font-weight:normal;
+    color:#999;
+    text-align:right;
+    line-height:1.1;
+    letter-spacing:0.2px;
   }
 
   /* TABS */
@@ -64,14 +77,13 @@
 
   /* SCROLLBAR */
   #scrollbar {
-    position: absolute; right: 2px; top: 38px; bottom: 30px; width: 14px;
+    position: absolute; right: 1px; top: 0; bottom: 30px; width: 2px;
     pointer-events: none; z-index: 50; display: none;
   }
   #scroll-thumb {
-    position: absolute; right: 0; width: 14px; background: rgba(238,51,51,0.9);
-    border-radius: 4px; color: #fff; text-align: center;
-    display: flex; align-items: center; justify-content: center;
-    min-height: 25px; transition: top 0.1s ease-out; font-weight: bold;
+    position: absolute; right: 0; width: 2px; background: rgba(238,51,51,0.9);
+    border-radius: 1px;
+    min-height: 20px; transition: top 0.1s ease-out;
   }
 
   /* Removes device native cursor outlines to let our custom .focused style takeover cleanly */
@@ -300,7 +312,7 @@
 </head>
 <body>
 <div id="app">
-  <div id="header">TubeCat</div>
+  <div id="header"><span id="header-title">TubeCat</span><span id="header-count"></span></div>
   <div id="tabs"></div>
   <div id="scrollbar"><div id="scroll-thumb"></div></div>
   <div id="content"></div>
@@ -912,11 +924,13 @@ function closeOptions() {
 function updateScrollbar() {
   var $scrollbar = document.getElementById("scrollbar");
   var $scrollThumb = document.getElementById("scroll-thumb");
+  var $headerCount = document.getElementById("header-count");
   var list = currentList();
   
   var validScreens = ["home", "channel", "playlistDetail", "search", "taggedVideos", "tagList", "feedSettings"];
   if (!list || list.length === 0 || validScreens.indexOf(state.screen) === -1) {
       $scrollbar.style.display = "none";
+      $headerCount.textContent = "";
       return;
   }
   
@@ -925,7 +939,7 @@ function updateScrollbar() {
   var ch = $content.clientHeight;
   var st = $content.scrollTop;
   
-  var thumbH = Math.max(25, (ch / sh) * ch);
+  var thumbH = Math.max(20, (ch / sh) * ch);
   if(thumbH > ch) thumbH = ch; 
   
   var maxTop = ch - thumbH;
@@ -936,7 +950,7 @@ function updateScrollbar() {
   
   var idx = state.focusIndex + 1;
   var tot = list.length;
-  $scrollThumb.innerHTML = "<span style='transform:scale(0.75); line-height: 1.1;'>" + idx + "<br/>/<br/>" + tot + "</span>";
+  $headerCount.textContent = idx + "/" + tot;
 }
 
 function updateFocusDOM() {
@@ -970,6 +984,7 @@ function updateFocusDOM() {
 
 /* ---------------- RENDER ---------------- */
 var $header = document.getElementById("header");
+var $headerTitle = document.getElementById("header-title");
 var $tabs = document.getElementById("tabs");
 var $content = document.getElementById("content");
 var $skLeft = document.getElementById("sk-left");
@@ -978,12 +993,20 @@ var $skRight = document.getElementById("sk-right");
 
 $content.addEventListener("scroll", updateScrollbar);
 
+function positionScrollbar(){
+  var $scrollbar = document.getElementById("scrollbar");
+  var headerH = $header.offsetHeight;
+  var tabsH = ($tabs.style.display === "none") ? 0 : $tabs.offsetHeight;
+  $scrollbar.style.top = (headerH + tabsH) + "px";
+}
+
 function render(){
   renderHeader(); 
   renderTabs(); 
   renderContent(); 
   renderOptionsMenu();
   renderSoftkeys();
+  positionScrollbar();
 }
 
 function renderHeader(){
@@ -998,7 +1021,7 @@ function renderHeader(){
   if(state.screen === "tagList") title = "Tags Menu";
   if(state.screen === "taggedVideos") title = "Tag: " + (state.currentTag||"").toUpperCase();
   if(state.screen === "help") title = "Help Menu";
-  $header.textContent = title;
+  $headerTitle.textContent = title;
 }
 
 function renderTabs(){
@@ -1017,6 +1040,7 @@ function renderTabs(){
   } else {
     $tabs.style.display = "none";
   }
+  positionScrollbar();
 }
 
 function fmtVideoItem(v, focused, q){
