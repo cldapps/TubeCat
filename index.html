@@ -63,7 +63,7 @@
   #content::-webkit-scrollbar{ display:none; }
 
   /* Removes device native cursor outlines to let our custom .focused style takeover cleanly */
-  .item:focus, .btn:focus, input:focus { outline: none; }
+  .focusable:focus, .item:focus, .btn:focus, input:focus { outline: none; }
 
   .list { list-style:none; margin:0; padding:0; }
   .item {
@@ -73,7 +73,7 @@
     line-height:1.35;
     color:#ddd;
   }
-  .item.focused {
+  .item.focused, .focusable.focused {
     background:#e33;
     color:#fff;
   }
@@ -108,12 +108,17 @@
     justify-content:space-between;
     align-items:center;
   }
+  .channel-row img {
+    width: 26px; height: 26px; border-radius: 50%;
+    margin-right: 8px; object-fit: cover; flex-shrink: 0;
+    background: #222;
+  }
   .channel-row .name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  /* OPTIONS MENU (CLOUD PHONE GUIDELINES LSK) */
+  /* OPTIONS MENU */
   #options-menu {
     position: absolute;
-    bottom: 23px; /* Just above softkeys */
+    bottom: 23px;
     left: 0; right: 0;
     background: #111;
     border-top: 2px solid #e33;
@@ -150,7 +155,7 @@
 
   /* FORM / MODAL VIEW */
   .form-view { padding:10px 8px; }
-  .form-view label { display:block; font-size:11px; color:#999; margin-bottom:3px; }
+  .form-view label { display:block; font-size:11px; color:#999; margin-bottom:3px; margin-top:8px; }
   .form-view input[type="text"] {
     width:100%;
     padding:6px;
@@ -158,11 +163,11 @@
     background:#1a1a1a;
     border:1px solid #444;
     color:#fff;
-    margin-bottom:12px;
+    margin-bottom:6px;
     border-radius:2px;
   }
   .form-view input[type="text"].focused { border-color:#e33; background:#222; }
-  .form-view .hint { color:#777; font-size:10.5px; margin-top:-8px; margin-bottom:12px; }
+  .form-view .hint { color:#777; font-size:10.5px; margin-top:-4px; margin-bottom:8px; }
 
   .toast {
     position:absolute;
@@ -198,8 +203,13 @@
     color:#999;
     line-height:1.4;
     white-space:pre-wrap;
-    max-height: 40vh;
-    overflow-y:auto;
+    padding: 6px;
+    border: 1px solid transparent;
+  }
+  .video-detail .desc.focused {
+    background: #222;
+    color: #fff;
+    border-color: #e33;
   }
   .video-detail .url {
     margin-top:10px;
@@ -220,14 +230,13 @@
     margin-bottom:6px;
   }
   
-  .btn-upload { background:#222; color:#fff; text-align:center; margin-top:5px; }
+  .btn-upload { background:#222; color:#fff; text-align:center; }
   .btn-upload.focused { background:#e33; border: 1px solid #fff; }
   .btn-watch { background:#e33; color:#fff; }
   .btn-watch.focused { background:#f55; border: 1px solid #fff; }
   .btn-watched { background:#333; color:#fff; }
   .btn-watched.focused { background:#555; border: 1px solid #fff; }
 
-  /* Red styling for watched state */
   .btn-watched.watched-red { background:#e33 !important; color:#fff !important; }
   .btn-watched.watched-red.focused { background:#f55 !important; border: 1px solid #fff; }
 
@@ -235,6 +244,10 @@
     width: 100%;
     margin-bottom: 12px;
     background: #000;
+    border: 2px solid transparent;
+  }
+  .iframe-container.focused {
+    border-color: #e33;
   }
 </style>
 </head>
@@ -265,6 +278,7 @@ var PAGE_SIZE = 50;
 var LS_CHANNELS = "tc_channels_v1";
 var LS_APIKEY   = "tc_apikey_v1";
 var LS_WATCHED  = "tc_watched_v1";
+var LS_SETTINGS = "tc_settings_v1";
 
 function lsGet(key, fallback){
   try {
@@ -362,9 +376,10 @@ var state = {
   playlistData: [],       
   homeData: { videos:[], playlists:[], shorts:[] },
   channelData: { videos:[], playlists:[], shorts:[] },
+  searchQuery: "",
+  searchResults: [],
   toast: null,
   toastTimer: null,
-  formFocus: 0,
   formValues: { input:"", label:"" },
   detailVideo: null,
   updating: {},
@@ -373,13 +388,14 @@ var state = {
 
 var apiKey = lsGet(LS_APIKEY, DEFAULT_API_KEY) || "";
 var watchedMap = lsGet(LS_WATCHED, {});
+var appSettings = lsGet(LS_SETTINGS, { autoUpdate: true, updateInterval: 12 });
 
 var channels = lsGet(LS_CHANNELS, null);
 if(!channels){
   channels = HARDCODED_CHANNELS.map(function(c){
     return {
       id: null, rawInput: c.input, label: c.label || c.input, uploadsPlaylistId: null,
-      thumbnail: "", lastUpdated: null, videoCount: 0, playlistCount: 0, shortCount: 0, error: null
+      thumbnail: "", lastUpdated: null, videoCount: 0, playlistCount: 0, shortCount: 0, error: null, excludeFeed: false
     };
   });
   lsSet(LS_CHANNELS, channels);
@@ -387,6 +403,7 @@ if(!channels){
 
 function saveChannels(){ lsSet(LS_CHANNELS, channels); }
 function saveWatched(){ lsSet(LS_WATCHED, watchedMap); }
+function saveAppSettings(){ lsSet(LS_SETTINGS, appSettings); }
 
 /* ---------------- UTIL ---------------- */
 function esc(s){
@@ -419,11 +436,19 @@ function parseISODuration(iso){
 
 function showToast(msg, ms){
   state.toast = msg;
-  render();
+  var existing = document.querySelector(".toast");
+  if(existing) existing.remove();
+  
+  var t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = state.toast;
+  document.getElementById("app").appendChild(t);
+  
   if(state.toastTimer) clearTimeout(state.toastTimer);
   state.toastTimer = setTimeout(function(){
-    state.toast = null;
-    render();
+    var ext = document.querySelector(".toast");
+    if(ext) ext.remove();
+    state.toastTimer = null;
   }, ms || 2200);
 }
 
@@ -620,15 +645,40 @@ function updateChannel(chanMeta){
   });
 }
 
+function doFuzzySearch(q) {
+  if(!q) return;
+  var lowerQ = q.toLowerCase();
+  showToast("Searching...");
+  idbGetAll("videos").then(function(vids){
+      idbGetAll("playlists").then(function(pls){
+          var matches = [];
+          vids.forEach(function(v){
+             if(v.title.toLowerCase().indexOf(lowerQ)>-1 || v.channelLabel.toLowerCase().indexOf(lowerQ)>-1) matches.push(v);
+          });
+          pls.forEach(function(p){
+             if(p.title.toLowerCase().indexOf(lowerQ)>-1 || p.channelLabel.toLowerCase().indexOf(lowerQ)>-1) matches.push(p);
+          });
+          state.screen = "search";
+          state.searchQuery = q;
+          state.searchResults = matches;
+          state.focusIndex = 0;
+          render();
+      });
+  });
+}
+
 /* ---------------- DATA LOADERS ---------------- */
 function loadHomeData(){
   return idbGetAll("videos").then(function(videos){
     return idbGetAll("playlists").then(function(playlists){
-      var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
-      var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
-      var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var excludedIds = channels.filter(function(c){ return c.excludeFeed; }).map(function(c){ return c.id; });
+      var feedFilter = function(v){ return !excludedIds.includes(v.channelId); };
+      
+      var vids = videos.filter(function(v){return v.type==="video" && feedFilter(v);}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var shorts = videos.filter(function(v){return v.type==="short" && feedFilter(v);}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
+      var pls = playlists.filter(feedFilter).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       state.homeData = { videos: vids, playlists: pls, shorts: shorts };
-      render();
+      if (state.screen === "home") render();
     });
   });
 }
@@ -640,7 +690,7 @@ function loadChannelData(chan){
       var shorts = videos.filter(function(v){return v.type==="short";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       var pls = playlists.slice().sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       state.channelData = { videos: vids, playlists: pls, shorts: shorts };
-      render();
+      if (state.screen === "channel") render();
     });
   });
 }
@@ -653,6 +703,8 @@ function currentList(){
   }
   if(state.screen === "channel") return state.channelData[state.channelTab] || [];
   if(state.screen === "playlistDetail") return state.playlistData || [];
+  if(state.screen === "search") return state.searchResults || [];
+  if(state.screen === "feedSettings") return channels;
   return [];
 }
 
@@ -697,14 +749,13 @@ function openPlaylistDetail(pl){
   }).catch(function(e){ showToast("Failed to load playlist"); });
 }
 
-function openAddChannel(){ state.screen = "addChannel"; state.formFocus = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
-function openSettings(){ state.screen = "settings"; state.formFocus = 0; state.formValues = { apiKey: apiKey }; closeOptions(); render(); }
+function openAddChannel(){ state.screen = "addChannel"; state.focusIndex = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
+function openSettings(){ state.screen = "settings"; state.focusIndex = 0; closeOptions(); render(); }
 function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; state.focusIndex = 0; closeOptions(); render(); }
 function openUrl(url){ window.open(url, "_blank"); }
 
 function doWatch(){
   if(state.detailVideo) {
-    // Only alter youtube.com to yout-ube.com for this playback button URL
     var modifiedUrl = state.detailVideo.url.replace(/youtube\.com/gi, "yout-ube.com").replace(/youtu\.be/gi, "yout-ube.com");
     openUrl(modifiedUrl);
   }
@@ -716,7 +767,25 @@ function toggleWatched(){
   if(watchedMap[vid]) delete watchedMap[vid];
   else watchedMap[vid] = true;
   saveWatched();
-  renderContent();
+  var btn = document.getElementById("btn-watched");
+  if(btn) {
+    if(watchedMap[vid]) { btn.classList.add("watched-red"); btn.textContent = "2. Mark Unwatched"; }
+    else { btn.classList.remove("watched-red"); btn.textContent = "2. Mark Watched"; }
+  }
+}
+
+function exportBackup() {
+  var data = { channels: channels, watched: watchedMap };
+  var str = JSON.stringify(data, null, 2);
+  var blob = new Blob([str], { type: "application/json" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "tubecat_backup.json";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  showToast("Backup downloaded!");
 }
 
 /* ---------------- OPTIONS MENU HELPERS ---------------- */
@@ -724,12 +793,39 @@ function openOptions(items) {
   state.optionsMenu.items = items;
   state.optionsMenu.focusIndex = 0;
   state.optionsMenu.open = true;
-  render();
+  renderOptionsMenu();
+  renderSoftkeys();
 }
 
 function closeOptions() {
   state.optionsMenu.open = false;
-  render();
+  renderOptionsMenu();
+  renderSoftkeys();
+}
+
+/* ---------------- DOM FOCUS ENGINE (NO RENDER) ---------------- */
+function updateFocusDOM() {
+  if (state.optionsMenu.open) {
+    renderOptionsMenu();
+    return;
+  }
+  var focusables = document.querySelectorAll(".item, .focusable");
+  if (!focusables.length) return;
+  
+  if (state.focusIndex < 0) state.focusIndex = focusables.length - 1;
+  if (state.focusIndex >= focusables.length) state.focusIndex = 0;
+
+  for(var i=0; i<focusables.length; i++){
+    var el = focusables[i];
+    if(i === state.focusIndex){
+      el.classList.add("focused");
+      el.setAttribute("tabindex", "0");
+      if(el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "auto" });
+    } else {
+      el.classList.remove("focused");
+      el.setAttribute("tabindex", "-1");
+    }
+  }
 }
 
 /* ---------------- RENDER ---------------- */
@@ -754,7 +850,9 @@ function renderHeader(){
   if(state.screen === "playlistDetail" && state.currentPlaylist) title = state.currentPlaylist.title;
   if(state.screen === "addChannel") title = "Add Channel";
   if(state.screen === "settings") title = "Settings";
+  if(state.screen === "feedSettings") title = "Feed Exclusions";
   if(state.screen === "videoDetail") title = "Details";
+  if(state.screen === "search") title = "Search Results";
   $header.textContent = title;
 }
 
@@ -779,26 +877,31 @@ function renderTabs(){
 function fmtVideoItem(v, focused){
   var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
   var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
-  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="video" data-id="' + esc(v.id) + '">' +
+  return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(v.id) + '">' +
     watched + badge + esc(v.title) +
     '<span class="meta">' + esc(v.channelLabel||"") + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
     '</li>';
 }
 function fmtPlaylistItem(p, focused){
-  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="playlist" data-id="' + esc(p.id) + '">' +
+  return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(p.id) + '">' +
     esc(p.title) + '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
 }
 function fmtChannelItem(c, idx, focused){
   var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
-  return '<li class="item' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-kind="channel" data-idx="' + idx + '">' +
-    '<div class="channel-row"><span class="name">' + esc(c.label) + '</span></div>' +
+  var thumb = c.thumbnail ? '<img src="' + esc(c.thumbnail) + '">' : '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">';
+  return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-idx="' + idx + '">' +
+    '<div class="channel-row">' + thumb + '<span class="name">' + esc(c.label) + '</span></div>' +
     '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span>' +
     '</li>';
+}
+function fmtMixedItem(it, focused){
+  if(it.itemCount !== undefined) return fmtPlaylistItem(it, focused);
+  return fmtVideoItem(it, focused);
 }
 
 function renderList(items, kind){
   if(!items.length){
-    var msg = (kind === "channel") ? "No channels yet. Press Options -> Add to start." : "No data yet.";
+    var msg = (kind === "channel") ? "No channels yet. Press Options -> Add." : "No data yet.";
     $content.innerHTML = '<div class="empty">' + msg + '</div>';
     return;
   }
@@ -808,18 +911,10 @@ function renderList(items, kind){
     if(kind === "video") html += fmtVideoItem(it, focused);
     else if(kind === "playlist") html += fmtPlaylistItem(it, focused);
     else if(kind === "channel") html += fmtChannelItem(it, i, focused);
+    else html += fmtMixedItem(it, focused);
   });
   html += "</ul>";
   $content.innerHTML = html;
-}
-
-function scrollFocusedIntoView(){
-  // Targets elements only within main content to prevent options menu scrolling layout clashes
-  var el = $content.querySelector(".focused"); 
-  if(el){
-    if(el.scrollIntoView){ el.scrollIntoView({ block: "nearest" }); }
-    if(typeof el.focus === 'function') { el.focus(); }
-  }
 }
 
 function renderContent(){
@@ -830,6 +925,13 @@ function renderContent(){
     renderList(currentList(), state.channelTab === "playlists" ? "playlist" : "video");
   } else if(state.screen === "playlistDetail"){
     renderList(currentList(), "video");
+  } else if(state.screen === "search"){
+    $content.innerHTML = '<div style="padding:8px;background:#222;font-size:11px;text-align:center;">Results for: '+esc(state.searchQuery)+'</div><div id="search-list"></div>';
+    var oldC = $content; $content = document.getElementById("search-list");
+    renderList(currentList(), "mixed");
+    $content = oldC;
+  } else if(state.screen === "feedSettings"){
+    renderFeedSettings();
   } else if(state.screen === "addChannel"){
     renderAddChannelForm();
   } else if(state.screen === "settings"){
@@ -837,45 +939,53 @@ function renderContent(){
   } else if(state.screen === "videoDetail"){
     renderVideoDetail();
   }
-  
-  var existing = document.querySelector(".toast");
-  if(existing) existing.remove();
-  if(state.toast){
-    var t = document.createElement("div");
-    t.className = "toast";
-    t.textContent = state.toast;
-    document.getElementById("app").appendChild(t);
-  }
-
-  setTimeout(scrollFocusedIntoView, 0); 
+  setTimeout(updateFocusDOM, 0); 
 }
 
 function renderAddChannelForm(){
   var f = state.formValues;
+  var focusStr = function(i){ return i===state.focusIndex?' focused':''; };
+  var tfx = function(i){ return i===state.focusIndex?'0':'-1'; };
   $content.innerHTML =
     '<div class="form-view">' +
     '<label>Channel ID, @handle, or URL</label>' +
-    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="input" value="' + esc(f.input) + '" readonly />' +
-    '<div class="hint">e.g. @veritasium or UCHnyfMqiRRG...</div>' +
+    '<input type="text" tabindex="'+tfx(0)+'" class="fld focusable'+focusStr(0)+'" value="' + esc(f.input) + '" readonly />' +
+    '<div class="hint">e.g. @veritasium or UCHnyf...</div>' +
     '<label>Label (optional)</label>' +
-    '<input type="text" tabindex="-1" class="fld' + (state.formFocus===1?' focused':'') + '" data-fld="label" value="' + esc(f.label) + '" readonly />' +
+    '<input type="text" tabindex="'+tfx(1)+'" class="fld focusable'+focusStr(1)+'" value="' + esc(f.label) + '" readonly />' +
     '</div>';
 }
 
 function renderSettingsForm(){
-  var f = state.formValues;
-  $content.innerHTML =
-    '<div class="form-view">' +
-    '<label>YouTube Data API v3 Key</label>' +
-    '<input type="text" tabindex="0" class="fld' + (state.formFocus===0?' focused':'') + '" data-fld="apiKey" value="' + esc(f.apiKey||"") + '" readonly />' +
-    '<div class="hint">Type key or upload txt file below</div>' +
-    '<label style="margin-top:12px;">Upload API Key (.txt)</label>' +
-    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===1?' focused':'') + '" id="btn-upload">Choose API File</button>' +
-    '<input type="file" id="api-file" accept=".txt" style="display:none;" />' +
-    '<label style="margin-top:12px;">Import Channels (.txt)</label>' +
-    '<button tabindex="-1" class="btn btn-upload' + (state.formFocus===2?' focused':'') + '" id="btn-import">Choose Chans File</button>' +
-    '<input type="file" id="channel-file" accept=".txt" style="display:none;" />' +
-    '</div>';
+  var focusStr = function(i){ return i===state.focusIndex?' focused':''; };
+  var tfx = function(i){ return i===state.focusIndex?'0':'-1'; };
+  var html = '<div class="form-view">';
+  html += '<label>YouTube Data API v3 Key</label>';
+  html += '<input type="text" tabindex="'+tfx(0)+'" class="fld focusable'+focusStr(0)+'" value="'+esc(apiKey)+'" readonly />';
+  html += '<label>Auto Update ('+(appSettings.autoUpdate?'ON':'OFF')+')</label>';
+  html += '<button tabindex="'+tfx(1)+'" class="btn btn-upload focusable'+focusStr(1)+'">Toggle Auto Update</button>';
+  html += '<label>Update Interval (Hours: '+appSettings.updateInterval+')</label>';
+  html += '<button tabindex="'+tfx(2)+'" class="btn btn-upload focusable'+focusStr(2)+'">Change Interval</button>';
+  html += '<label>Feed Exclusions</label>';
+  html += '<button tabindex="'+tfx(3)+'" class="btn btn-upload focusable'+focusStr(3)+'">Manage Feed Channels</button>';
+  html += '<label>Data Backup & Restore</label>';
+  html += '<button tabindex="'+tfx(4)+'" class="btn btn-upload focusable'+focusStr(4)+'">Export Backup (JSON)</button>';
+  html += '<button tabindex="'+tfx(5)+'" class="btn btn-upload focusable'+focusStr(5)+'" id="btn-import">Import Key/Data (.txt/.json)</button>';
+  html += '<input type="file" id="general-file" style="display:none;" />';
+  html += '</div>';
+  $content.innerHTML = html;
+}
+
+function renderFeedSettings(){
+  if(!channels.length){ $content.innerHTML='<div class="empty">No channels added.</div>'; return; }
+  var html = '<div style="padding:6px; font-size:11px; color:#999;">Select channels to hide from Feed:</div><ul class="list">';
+  channels.forEach(function(c, i){
+    var focused = i === state.focusIndex;
+    var checked = c.excludeFeed ? "<span style='color:#e33'>[X]</span>" : "[ ]";
+    html += '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused?'0':'-1') + '">' + checked + ' ' + esc(c.label) + '</li>';
+  });
+  html += '</ul>';
+  $content.innerHTML = html;
 }
 
 function renderVideoDetail(){
@@ -883,24 +993,28 @@ function renderVideoDetail(){
   if(!v){ $content.innerHTML = '<div class="empty">No item</div>'; return; }
   var isWatched = watchedMap[v.id];
   
-  var watchClass = "btn btn-watch" + (state.focusIndex === 0 ? " focused" : "");
-  var watchedClass = "btn btn-watched" + (isWatched ? " watched-red" : "") + (state.focusIndex === 1 ? " focused" : "");
+  var fStr = function(i){ return i===state.focusIndex?' focused':''; };
+  var tfx = function(i){ return i===state.focusIndex?'0':'-1'; };
+
+  var watchClass = "btn btn-watch focusable" + fStr(0);
+  var watchedClass = "btn btn-watched focusable" + (isWatched ? " watched-red" : "") + fStr(1);
 
   var btns = '<div style="margin-bottom:12px;">' +
-    '<button tabindex="0" class="' + watchClass + '" id="btn-watch">1. Watch</button>' +
-    '<button tabindex="-1" class="' + watchedClass + '" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
+    '<button tabindex="'+tfx(0)+'" class="' + watchClass + '" id="btn-watch">1. Watch</button>' +
+    '<button tabindex="'+tfx(1)+'" class="' + watchedClass + '" id="btn-watched">2. ' + (isWatched ? "Mark Unwatched" : "Mark Watched") + '</button>' +
     '</div>';
 
-  // Embed iframe structure preserving standard Youtube URL for iframe
-  var iframeHtml = '<div class="iframe-container">' + 
+  var iframeHtml = '<div class="iframe-container focusable' + fStr(2) + '" tabindex="'+tfx(2)+'">' + 
     '<iframe width="100%" height="140" src="https://www.youtube.com/embed/' + v.id + '" frameborder="0" allowfullscreen></iframe>' + 
     '</div>';
+    
+  var descHtml = v.description ? '<div class="desc focusable'+fStr(3)+'" tabindex="'+tfx(3)+'">' + esc(v.description.slice(0,600)) + '</div>' : '';
 
   $content.innerHTML =
     '<div class="video-detail">' + btns + iframeHtml +
     '<h2>' + esc(v.title) + '</h2>' +
     '<div class="chan">' + esc(v.channelLabel||"") + '</div>' +
-    (v.description ? '<div class="desc">' + esc(v.description.slice(0,600)) + '</div>' : '') +
+    descHtml +
     '<div class="url">' + esc(v.url) + '</div>' +
     '</div>';
 }
@@ -927,22 +1041,22 @@ function renderOptionsMenu() {
 }
 
 function renderSoftkeys(){
-  // Defaults strictly applying Cloudfone Standards
   var l="Options", c="", r="Back";
 
   if(state.optionsMenu.open) {
     l = ""; c = "Select"; r = "Cancel";
   } else {
-    // History Back override mapped appropriately
     if(state.screen === "home") r = "Exit";
 
-    // Center Action Mapping based on UI State
-    if(state.screen === "home" || state.screen === "channel" || state.screen === "playlistDetail"){
+    if(state.screen === "home" || state.screen === "channel" || state.screen === "playlistDetail" || state.screen === "search"){
       c = "Open";
     } else if(state.screen === "addChannel" || state.screen === "settings") {
       c = "Edit";
+    } else if(state.screen === "feedSettings") {
+      c = "Toggle";
     } else if(state.screen === "videoDetail") {
-      c = "Select";
+      if(state.focusIndex === 0 || state.focusIndex === 1) c = "Select";
+      else c = "Scroll";
     }
   }
 
@@ -953,10 +1067,20 @@ function renderSoftkeys(){
 
 /* ---------------- INPUT HANDLING ---------------- */
 function moveFocus(delta){
-  var list = currentList();
-  if(!list.length) return;
-  state.focusIndex = Math.max(0, Math.min(list.length - 1, state.focusIndex + delta));
-  renderContent();
+  var max = 0;
+  if (state.optionsMenu.open) {
+    max = state.optionsMenu.items.length;
+    if(!max) return;
+    state.optionsMenu.focusIndex = (state.optionsMenu.focusIndex + delta + max) % max;
+    renderOptionsMenu();
+  } else {
+    var focusables = document.querySelectorAll(".item, .focusable");
+    max = focusables.length;
+    if(!max) return;
+    state.focusIndex = (state.focusIndex + delta + max) % max;
+    updateFocusDOM();
+    renderSoftkeys();
+  }
 }
 
 function switchHomeTab(tabName){
@@ -970,7 +1094,7 @@ function switchChannelTab(tabName){
 }
 
 function switchTab(delta){
-  if(state.optionsMenu.open) return; // Disable tab swap when options are overlaid
+  if(state.optionsMenu.open) return;
   if(state.screen === "home"){
     var order = ["videos","playlists","channels","shorts"];
     var i = order.indexOf(state.homeTab);
@@ -990,34 +1114,73 @@ function doCenterAction(){
     return;
   }
 
+  if(state.screen === "addChannel"){
+    var fldName = state.focusIndex === 0 ? "input" : "label";
+    var val = prompt(state.focusIndex === 0 ? "ID / @handle / URL" : "Label (optional)", state.formValues[fldName] || "");
+    if(val !== null){ state.formValues[fldName] = val; renderContent(); }
+    return;
+  }
+  
+  if(state.screen === "settings"){
+    switch(state.focusIndex){
+      case 0:
+        var valApi = prompt("YouTube Data API v3 Key", apiKey || "");
+        if(valApi !== null){ apiKey = valApi; lsSet(LS_APIKEY, apiKey); renderContent(); }
+        break;
+      case 1:
+        appSettings.autoUpdate = !appSettings.autoUpdate; saveAppSettings(); renderContent(); showToast(appSettings.autoUpdate ? "Auto Update ON" : "Auto Update OFF");
+        break;
+      case 2:
+        var hr = prompt("Update Interval (Hours)", appSettings.updateInterval);
+        if(hr !== null && !isNaN(parseInt(hr))){ appSettings.updateInterval = Math.min(1000, Math.max(1, parseInt(hr))); saveAppSettings(); renderContent(); }
+        break;
+      case 3:
+        state.screen = "feedSettings"; state.focusIndex = 0; render();
+        break;
+      case 4: exportBackup(); break;
+      case 5: document.getElementById("general-file").click(); break;
+    }
+    return;
+  }
+  
+  if(state.screen === "feedSettings"){
+    var cFe = channels[state.focusIndex];
+    if(cFe) {
+      cFe.excludeFeed = !cFe.excludeFeed;
+      saveChannels();
+      renderContent();
+      showToast(cFe.excludeFeed ? "Hidden from Feed" : "Shown in Feed");
+    }
+    return;
+  }
+  
+  if(state.screen === "videoDetail"){
+    if(state.detailVideo) {
+      if(state.focusIndex === 0) doWatch();
+      else if (state.focusIndex === 1) toggleWatched();
+    }
+    return;
+  }
+
   var list = currentList();
   var it = list[state.focusIndex];
-  
+  if(!it) return;
+
   if(state.screen === "home"){
-    if(!it) return;
     if(state.homeTab === "channels") openChannel(it);
     else if(state.homeTab === "playlists") openPlaylistDetail(it);
     else openVideoDetail(it);
   } else if(state.screen === "channel"){
-    if(!it) return;
     if(state.channelTab === "playlists") openPlaylistDetail(it);
     else openVideoDetail(it);
-  } else if(state.screen === "playlistDetail"){
-    if(it) openVideoDetail(it);
-  } else if(state.screen === "addChannel" || state.screen === "settings"){
-    if(state.screen === "settings" && state.formFocus === 1) { document.getElementById("api-file").click(); }
-    else if(state.screen === "settings" && state.formFocus === 2) { document.getElementById("channel-file").click(); }
-    else { editCurrentField(); }
-  } else if(state.screen === "videoDetail"){
-    if(state.detailVideo) {
-      if(state.focusIndex === 0) doWatch();
-      else toggleWatched();
-    }
+  } else if(state.screen === "playlistDetail" || state.screen === "search"){
+    if(it.itemCount !== undefined) openPlaylistDetail(it);
+    else openVideoDetail(it);
   }
 }
 
 function doLeftAction(){
-  if(state.optionsMenu.open) return; // Do nothing if options are already open
+  if(state.optionsMenu.open) return;
 
   var items = [];
   if(state.screen === "home"){
@@ -1049,14 +1212,10 @@ function doLeftAction(){
       if(idx !== -1) { removeChannelAt(idx); goHome(); }
     }});
     items.push({ label: "Settings", action: openSettings });
-  } else if(state.screen === "playlistDetail"){
+  } else if(state.screen === "playlistDetail" || state.screen === "search" || state.screen === "feedSettings"){
     items.push({ label: "Settings", action: openSettings });
   } else if(state.screen === "addChannel"){
     items.push({ label: "Save Channel", action: saveNewChannel });
-  } else if(state.screen === "settings"){
-    items.push({ label: "Save Settings", action: saveSettings });
-    items.push({ label: "Choose API Key (.txt)", action: function(){ document.getElementById("api-file").click(); } });
-    items.push({ label: "Import Channels (.txt)", action: function(){ document.getElementById("channel-file").click(); } });
   } else if(state.screen === "videoDetail"){
     items.push({ label: "Watch (yout-ube.com)", action: doWatch });
     items.push({ label: (watchedMap[state.detailVideo.id] ? "Mark Unwatched" : "Mark Watched"), action: toggleWatched });
@@ -1072,10 +1231,9 @@ function doRightAction(){
     return;
   }
   
-  // Strict Cloudfone Pattern - Right Soft Key is ALWAYS History Back (or exit)
   if(state.screen === "home"){
     showToast("To exit, press Home button");
-  } else if(state.screen === "channel"){
+  } else if(state.screen === "channel" || state.screen === "search" || state.screen === "feedSettings"){
     goHome();
   } else if(state.screen === "playlistDetail"){
     state.screen = state.playlistSource || "home";
@@ -1083,19 +1241,9 @@ function doRightAction(){
   } else if(state.screen === "addChannel" || state.screen === "settings"){
     if(channels.length) goChannelsTab(); else goHome();
   } else if(state.screen === "videoDetail"){
-    state.screen = state.currentPlaylist ? "playlistDetail" : (state.currentChannel ? "channel" : "home");
+    if (state.searchQuery && state.playlistSource === 'search') state.screen = "search";
+    else state.screen = state.currentPlaylist ? "playlistDetail" : (state.currentChannel ? "channel" : "home");
     render();
-  }
-}
-
-function editCurrentField(){
-  if(state.screen === "addChannel"){
-    var fldName = state.formFocus === 0 ? "input" : "label";
-    var val = prompt(state.formFocus === 0 ? "ID / @handle / URL" : "Label (optional)", state.formValues[fldName] || "");
-    if(val !== null){ state.formValues[fldName] = val; renderContent(); }
-  } else if(state.screen === "settings"){
-    var val2 = prompt("YouTube Data API v3 Key", state.formValues.apiKey || "");
-    if(val2 !== null){ state.formValues.apiKey = val2; renderContent(); }
   }
 }
 
@@ -1103,18 +1251,11 @@ function saveNewChannel(){
   var input = (state.formValues.input || "").trim();
   if(!input){ showToast("Enter a channel ID, handle, or URL"); return; }
   if(channels.some(function(c){ return c.rawInput === input; })){ showToast("Channel already added"); return; }
-  var newChan = { id:null, rawInput:input, label:state.formValues.label||input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null };
+  var newChan = { id:null, rawInput:input, label:state.formValues.label||input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null, excludeFeed:false };
   channels.push(newChan); saveChannels();
   goChannelsTab();
   showToast("Fetching channel...");
   updateChannel(newChan).then(function(ok){ showToast(ok ? ("Added " + newChan.label) : "Could not fetch channel"); });
-}
-
-function saveSettings(){
-  apiKey = (state.formValues.apiKey || "").trim();
-  lsSet(LS_APIKEY, apiKey);
-  showToast("Settings saved");
-  if(channels.length) goChannelsTab(); else goHome();
 }
 
 function removeChannelAt(idx){
@@ -1139,37 +1280,62 @@ function refreshAllChannels(){
 }
 
 /* ============================================================
-   CloudMosa Device Listeners 
+   CloudMosa / KaiOS Fast Key Repeat & Listening
    ============================================================ */
+var keyRepeatTimer = null;
+var keyRepeatInterval = null;
+var activeKey = null;
 
-/* 1. CloudMosa specific RSK (Right Soft Key) handler */
+function startKeyRepeat(actionFn) {
+   actionFn();
+   keyRepeatTimer = setTimeout(function(){
+       keyRepeatInterval = setInterval(actionFn, 65); // High speed scrolling delay
+   }, 300); 
+}
+function stopKeyRepeat() {
+   clearTimeout(keyRepeatTimer);
+   clearInterval(keyRepeatInterval);
+   keyRepeatTimer = null;
+   keyRepeatInterval = null;
+   activeKey = null;
+}
+
 window.addEventListener("back", function(e){
-  e.preventDefault(); // Stop default browser back navigation
-  doRightAction();    // Route to the app's internal back/cancel logic
+  e.preventDefault(); 
+  doRightAction();    
 });
 
-/* 2. Key handling - With CloudMosa LSK (Escape) + Fallbacks */
 document.addEventListener("keydown", function(e){
   var key = e.key;
   var code = e.keyCode || e.which;
 
-  // CloudMosa LSK is Escape (code 27). Fallback to '*' for testing in standard browsers.
   if (key === "Escape" || code === 27 || key === "*") key = "SoftLeft";
-  // Right Soft Key fallback for standard browser testing
   else if (key === "#") key = "SoftRight";
-  // D-Pad Fixes
   else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
   else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
   else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
   else if (key === "ArrowRight" || key === "Right" || code === 39) key = "ArrowRight";
   else if (key === "Enter" || code === 13) key = "Enter";
-  // Keeping Backspace mapped to BrowserBack just in case it's triggered inside a web test emulator
   else if (key === "Backspace" || key === "BrowserBack" || code === 8) key = "Backspace";
+
+  if (key === activeKey) { e.preventDefault(); return; } // Ignore native repeat events
 
   var navKeys = ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "SoftLeft", "SoftRight", "Enter"];
   if(navKeys.indexOf(key) !== -1) { e.preventDefault(); }
 
+  if(key === "ArrowUp") { activeKey = key; startKeyRepeat(function(){ moveFocus(-1); }); return; }
+  if(key === "ArrowDown") { activeKey = key; startKeyRepeat(function(){ moveFocus(1); }); return; }
+  
+  // Normal non-repeating
+  stopKeyRepeat();
+
   switch(key){
+    case "0":
+      if(!state.optionsMenu.open && state.screen !== "addChannel" && state.screen !== "settings") {
+         var q = prompt("Fuzzy Search (Lists/Videos):");
+         if (q) doFuzzySearch(q);
+      }
+      break;
     case "1":
       if(!state.optionsMenu.open) {
         if(state.screen === "home"){ e.preventDefault(); switchHomeTab("videos"); }
@@ -1193,100 +1359,86 @@ document.addEventListener("keydown", function(e){
     case "4":
       if(!state.optionsMenu.open && state.screen === "home"){ e.preventDefault(); switchHomeTab("shorts"); }
       break;
-    case "ArrowUp":
-      if(state.optionsMenu.open) {
-        state.optionsMenu.focusIndex = Math.max(0, state.optionsMenu.focusIndex - 1); renderOptionsMenu();
-      } else if(state.screen==="addChannel"){ 
-        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
-      } else if (state.screen==="settings") {
-        state.formFocus = Math.max(0, state.formFocus - 1); renderContent(); 
-      } else if (state.screen==="videoDetail") { 
-        state.focusIndex = Math.max(0, state.focusIndex - 1); renderContent(); 
-      } else { moveFocus(-1); }
-      break;
-    case "ArrowDown":
-      if(state.optionsMenu.open) {
-        state.optionsMenu.focusIndex = Math.min(state.optionsMenu.items.length - 1, state.optionsMenu.focusIndex + 1); renderOptionsMenu();
-      } else if(state.screen==="addChannel"){ 
-        state.formFocus = Math.min(1, state.formFocus + 1); renderContent(); 
-      } else if (state.screen==="settings") {
-        state.formFocus = Math.min(2, state.formFocus + 1); renderContent(); 
-      } else if (state.screen==="videoDetail") { 
-        state.focusIndex = Math.min(1, state.focusIndex + 1); renderContent(); 
-      } else { moveFocus(1); }
-      break;
     case "ArrowLeft": switchTab(-1); break;
     case "ArrowRight": switchTab(1); break;
     case "Enter": doCenterAction(); break;
-    
-    // CloudMosa LSK Mapping Trigger (Escape / *)
     case "SoftLeft": doLeftAction(); break;
-    
-    // Right Soft Key fallback Trigger (#)
     case "SoftRight": doRightAction(); break;
-    
-    // Secondary fallback for Back functionality in web emulators
     case "Backspace": e.preventDefault(); doRightAction(); break; 
   }
 });
 
+document.addEventListener("keyup", function(e){
+  var key = e.key;
+  var code = e.keyCode || e.which;
+  if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
+  else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
+  if (key === activeKey) stopKeyRepeat();
+});
+
 /* Click/touch fallback & File upload handler */
 $content.addEventListener("change", function(e){
-  if(e.target.id === "api-file"){
+  if(e.target.id === "general-file"){
     var file = e.target.files[0];
-    if(file){
-      var reader = new FileReader();
-      reader.onload = function(evt){
-        var text = evt.target.result.trim();
-        if(text){ state.formValues.apiKey = text; renderContent(); showToast("API Key loaded from file!"); }
-      };
-      reader.readAsText(file);
-    }
-  } else if (e.target.id === "channel-file"){
-    var cFile = e.target.files[0];
-    if(cFile){
-      var cReader = new FileReader();
-      cReader.onload = function(evt){
-        var text = evt.target.result;
-        if(text){
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(evt){
+      var text = evt.target.result.trim();
+      if(!text) return;
+      if(text.charAt(0) === '{') {
+        try {
+          var data = JSON.parse(text);
+          if (data.channels) {
+            var added = 0;
+            data.channels.forEach(function(rc){
+               if(!channels.some(function(ec){ return ec.rawInput === rc.rawInput; })){
+                 channels.push(rc); added++;
+               }
+            });
+            if(added) saveChannels();
+          }
+          if (data.watched) {
+            Object.keys(data.watched).forEach(function(k){ watchedMap[k] = true; });
+            saveWatched();
+          }
+          showToast("Backup restored successfully!");
+          renderContent();
+        } catch(ex){ showToast("Invalid backup JSON"); }
+      } else if (text.indexOf('youtube.com') > -1 || text.indexOf('@') > -1) {
           var lines = text.split(/\r?\n/);
-          var added = 0;
+          var cAdded = 0;
           lines.forEach(function(line){
             var input = line.trim();
             if(!input) return;
-            var exists = channels.some(function(c){ return c.rawInput === input; });
-            if(!exists){
-              channels.push({ id:null, rawInput:input, label:input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null });
-              added++;
+            if(!channels.some(function(c){ return c.rawInput === input; })){
+              channels.push({ id:null, rawInput:input, label:input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null, excludeFeed:false });
+              cAdded++;
             }
           });
-          if(added > 0){
-            saveChannels();
-            showToast("Imported " + added + " new channels!");
-          } else {
-            showToast("No new channels found.");
-          }
-        }
-      };
-      cReader.readAsText(cFile);
-    }
+          if(cAdded > 0){ saveChannels(); showToast("Imported " + cAdded + " channels!"); }
+      } else {
+          apiKey = text; lsSet(LS_APIKEY, apiKey); renderContent(); showToast("API Key loaded!");
+      }
+    };
+    reader.readAsText(file);
   }
 });
 
 $content.addEventListener("click", function(e){
   if(e.target.id === "btn-watch"){ doWatch(); return; }
   if(e.target.id === "btn-watched"){ toggleWatched(); return; }
-  if(e.target.id === "btn-upload"){ document.getElementById("api-file").click(); return; }
-  if(e.target.id === "btn-import"){ document.getElementById("channel-file").click(); return; }
+  if(e.target.id === "btn-import"){ document.getElementById("general-file").click(); return; }
+  if(e.target.id === "btn-export"){ exportBackup(); return; }
 
-  var li = e.target.closest ? e.target.closest(".item") : null;
+  var li = e.target.closest ? e.target.closest(".item, .focusable") : null;
   if(!li) return;
   
-  var kind = li.getAttribute("data-kind");
-  if(kind === "channel"){
+  if(li.hasAttribute("data-idx")){
     var idx = parseInt(li.getAttribute("data-idx"), 10);
-    state.focusIndex = idx; openChannel(channels[idx]);
-  } else {
+    state.focusIndex = idx; 
+    if(state.screen === "feedSettings") doCenterAction();
+    else openChannel(channels[idx]);
+  } else if (li.classList.contains("item")) {
     var domIdx = Array.prototype.indexOf.call(li.parentNode.children, li);
     state.focusIndex = domIdx; doCenterAction();
   }
@@ -1321,13 +1473,16 @@ openDB().then(function(_db){
     }
   } else {
     goHome();
-    var stale = channels.filter(function(c){
-      return !c.lastUpdated || (Date.now() - new Date(c.lastUpdated).getTime() > 12*3600*1000);
-    });
-    if(stale.length){
-      var chain = Promise.resolve();
-      stale.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
-      chain.then(function(){ loadHomeData(); });
+    if (appSettings.autoUpdate) {
+      var limitHours = appSettings.updateInterval * 3600 * 1000;
+      var stale = channels.filter(function(c){
+        return !c.lastUpdated || (Date.now() - new Date(c.lastUpdated).getTime() > limitHours);
+      });
+      if(stale.length){
+        var chain = Promise.resolve();
+        stale.forEach(function(c){ chain = chain.then(function(){ return updateChannel(c); }); });
+        chain.then(function(){ loadHomeData(); });
+      }
     }
   }
   render();
