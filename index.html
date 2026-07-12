@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=240, initial-scale=1, user-scalable=no">
 <title>TubeCat</title>
 <meta name="theme-color" content="#0f0f0f">
-<link rel="manifest" href="manifest.webapp">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-56.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html,body {
@@ -91,21 +93,32 @@
 
   .list { list-style:none; margin:0; padding:0; }
   .item {
-    padding:7px 6px;
+    padding:6px;
     border-bottom:1px solid #222;
     font-size:12.5px;
     line-height:1.35;
     color:#ddd;
+    display:flex;
+    align-items:center;
   }
   .item.focused, .focusable.focused {
     background:#e33;
     color:#fff;
   }
+  .item .thumb {
+    width:44px; height:44px; border-radius:3px;
+    margin-right:8px; object-fit:cover; flex-shrink:0;
+    background:#222;
+  }
+  .item .thumb.round { border-radius:50%; width:26px; height:26px; }
+  .item .info { flex:1; overflow:hidden; }
+  .item .title-line { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .item .meta {
     display:block;
     font-size:10.5px;
     color:#999;
     margin-top:2px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   }
   .item.focused .meta { color:#fdd; }
 
@@ -511,6 +524,17 @@ function parseISODuration(iso){
   return h*3600 + mi*60 + s;
 }
 
+function fmtDuration(sec){
+  if(!sec) return "";
+  var h = Math.floor(sec/3600);
+  var m = Math.floor((sec%3600)/60);
+  var s = sec%60;
+  if(h > 0) return h + ":" + (m<10?"0":"") + m + ":" + (s<10?"0":"") + s;
+  return m + ":" + (s<10?"0":"") + s;
+}
+
+var TRANSPARENT_PX = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+
 function showToast(msg, ms){
   state.toast = msg;
   var existing = document.querySelector(".toast");
@@ -572,7 +596,7 @@ function resolveChannel(rawInput){
     var it = data.items[0];
     return {
       id: it.id, title: it.snippet.title,
-      thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.default||{}).url) || "",
+      thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default || {}).url) || "",
       uploadsPlaylistId: it.contentDetails.relatedPlaylists.uploads
     };
   }
@@ -632,6 +656,7 @@ function fetchPlaylistVideos(playlistId) {
             channelLabel: it.snippet.videoOwnerChannelTitle || "Unknown",
             title: it.snippet.title,
             publishedAt: it.contentDetails.videoPublishedAt || it.snippet.publishedAt,
+            thumbnail: (it.snippet.thumbnails && (it.snippet.thumbnails.medium || it.snippet.thumbnails.default || {}).url) || "",
             duration: durMap[vid] || 0,
             type: "video",
             url: "https://www.youtube.com/watch?v=" + vid
@@ -1045,22 +1070,30 @@ function renderTabs(){
 
 function fmtVideoItem(v, focused, q){
   var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
+  var durBadge = v.duration ? '<span class="badge">' + fmtDuration(v.duration) + '</span>' : '';
   var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
+  var thumb = v.thumbnail ? '<img class="thumb" src="' + esc(v.thumbnail) + '">' : '<img class="thumb" src="'+TRANSPARENT_PX+'">';
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(v.id) + '">' +
-    watched + badge + highlightText(v.title, q) +
-    '<span class="meta">' + highlightText(v.channelLabel||"", q) + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
+    thumb +
+    '<div class="info"><div class="title-line">' + watched + badge + durBadge + highlightText(v.title, q) + '</div>' +
+    '<span class="meta">' + highlightText(v.channelLabel||"", q) + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span></div>' +
     '</li>';
 }
 function fmtPlaylistItem(p, focused, q){
+  var thumb = p.thumbnail ? '<img class="thumb" src="' + esc(p.thumbnail) + '">' : '<img class="thumb" src="'+TRANSPARENT_PX+'">';
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(p.id) + '">' +
-    highlightText(p.title, q) + '<span class="meta">' + highlightText(p.channelLabel||"", q) + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
+    thumb +
+    '<div class="info"><div class="title-line">' + highlightText(p.title, q) + '</div>' +
+    '<span class="meta">' + highlightText(p.channelLabel||"", q) + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></div>' +
+    '</li>';
 }
 function fmtChannelItem(c, idx, focused, q){
   var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
-  var thumb = c.thumbnail ? '<img src="' + esc(c.thumbnail) + '">' : '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">';
+  var thumb = c.thumbnail ? '<img class="thumb round" src="' + esc(c.thumbnail) + '">' : '<img class="thumb round" src="'+TRANSPARENT_PX+'">';
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-idx="' + idx + '">' +
-    '<div class="channel-row">' + thumb + '<span class="name">' + highlightText(c.label, q) + '</span></div>' +
-    '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span>' +
+    thumb +
+    '<div class="info"><div class="title-line">' + highlightText(c.label, q) + '</div>' +
+    '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span></div>' +
     '</li>';
 }
 function fmtTagItem(t, focused){

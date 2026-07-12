@@ -1,0 +1,29 @@
+{
+  "name": "TubeCat",
+  "description": "Your followed YouTube channels, videos, shorts, and playlists in one lightweight feed.",
+  "launch_path": "/index.html",
+  "type": "privileged",
+  "icons": {
+    "56": "/icons/icon-56.png",
+    "112": "/icons/icon-112.png",
+    "128": "/icons/icon-128.png"
+  },
+  "developer": {
+    "name": "TubeCat"
+  },
+  "default_locale": "en",
+  "orientation": ["portrait-primary"],
+  "fullscreen": "true",
+  "chrome": {
+    "navigation": false
+  },
+  "permissions": {
+    "desktop-notification": {
+      "description": "Update and feed notifications"
+    },
+    "systemXHR": {
+      "description": "Fetch channel and playlist data from the YouTube Data API"
+    }
+  },
+  "csp": "default-src * data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'"
+}
