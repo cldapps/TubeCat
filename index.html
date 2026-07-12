@@ -15,7 +15,8 @@
     font-size: 13px;
     overflow:hidden;
   }
-  #app { display:flex; flex-direction:column; height:100vh; height:100dvh; position:relative; }
+  /* Removed 100dvh for legacy compatibility */
+  #app { display:flex; flex-direction:column; height:100vh; position:relative; }
 
   /* HEADER */
   #header {
@@ -346,6 +347,7 @@ var db = null;
 
 function openDB(){
   return new Promise(function(resolve, reject){
+    if (!window.indexedDB) return reject(new Error("No indexedDB"));
     var req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = function(e){
       var _db = e.target.result;
@@ -379,6 +381,7 @@ function idbPutAll(storeName, items){
 
 function idbGetAllByChannel(storeName, channelId){
   return new Promise(function(resolve, reject){
+    if (!channelId) return resolve([]);
     var tx = db.transaction(storeName, "readonly");
     var store = tx.objectStore(storeName);
     var idx = store.index("channelId");
@@ -400,6 +403,7 @@ function idbGetAll(storeName){
 
 function idbDeleteByChannel(storeName, channelId){
   return new Promise(function(resolve, reject){
+    if (!channelId) return resolve();
     var tx = db.transaction(storeName, "readwrite");
     var store = tx.objectStore(storeName);
     var idx = store.index("channelId");
@@ -415,6 +419,8 @@ function idbDeleteByChannel(storeName, channelId){
 
 /* ---------------- STATE ---------------- */
 var tagMap = lsGet(LS_TAGS, {});
+if (!tagMap || typeof tagMap !== "object") tagMap = {};
+
 var tagDef = {3:'like', 4:'unlike', 5:'rare', 6:'inspiring', 7:'spiritual', 8:'watchlater', 9:'important'};
 var tagOptions = Object.keys(tagDef).map(function(k){ return { title: k + " - " + tagDef[k], tagId: tagDef[k], keyNum: k }; });
 
@@ -443,11 +449,17 @@ var state = {
 };
 
 var apiKey = lsGet(LS_APIKEY, DEFAULT_API_KEY) || "";
-var watchedMap = lsGet(LS_WATCHED, {});
-var appSettings = lsGet(LS_SETTINGS, { autoUpdate: true, updateInterval: 12 });
 
-var channels = lsGet(LS_CHANNELS, null);
-if(!channels){
+var watchedMap = lsGet(LS_WATCHED, {});
+if (!watchedMap || typeof watchedMap !== "object") watchedMap = {};
+
+var appSettings = lsGet(LS_SETTINGS, { autoUpdate: true, updateInterval: 12 });
+if (!appSettings || typeof appSettings !== "object") appSettings = { autoUpdate: true, updateInterval: 12 };
+if (appSettings.autoUpdate === undefined) appSettings.autoUpdate = true;
+if (appSettings.updateInterval === undefined) appSettings.updateInterval = 12;
+
+var channels = lsGet(LS_CHANNELS, []);
+if (!channels || !Array.isArray(channels)) {
   channels = HARDCODED_CHANNELS.map(function(c){
     return {
       id: null, rawInput: c.input, label: c.label || c.input, uploadsPlaylistId: null,
@@ -455,6 +467,11 @@ if(!channels){
     };
   });
   lsSet(LS_CHANNELS, channels);
+} else {
+  // Ensure boolean fallbacks exist on old saved data to prevent crashes
+  channels.forEach(function(c) {
+     if(c.excludeFeed === undefined) c.excludeFeed = false;
+  });
 }
 
 function saveChannels(){ lsSet(LS_CHANNELS, channels); }
@@ -470,8 +487,9 @@ function esc(s){
 
 function highlightText(text, query) {
   var eText = esc(text);
-  if (!query) return eText;
+  if (!query || !query.trim()) return eText;
   var safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!safeQuery) return eText;
   var regex = new RegExp("(" + safeQuery + ")", "gi");
   return eText.replace(regex, '<span class="highlight">$1</span>');
 }
@@ -740,20 +758,24 @@ function doFuzzySearch(q) {
                        $content.innerHTML = '<div class="empty" style="padding-top:30px;">No matches found.</div>';
                   }
                   $content = oldC;
-                  // Just updates DOM focus outline properly after DOM injection
                   updateFocusDOM();
               }
           }
-      });
-  });
+      }).catch(function(e){});
+  }).catch(function(e){});
 }
 
 /* ---------------- DATA LOADERS ---------------- */
 function loadHomeData(){
   return idbGetAll("videos").then(function(videos){
     return idbGetAll("playlists").then(function(playlists){
-      var excludedIds = channels.filter(function(c){ return c.excludeFeed; }).map(function(c){ return c.id; });
-      var feedFilter = function(v){ return !excludedIds.includes(v.channelId); };
+      
+      var excludedIds = [];
+      channels.forEach(function(c) { 
+         if(c.excludeFeed && c.id) excludedIds.push(c.id); 
+      });
+      // Replace Array.prototype.includes with indexOf to prevent crashing on older KaiOS
+      var feedFilter = function(v){ return excludedIds.indexOf(v.channelId) === -1; };
       
       var vids = videos.filter(function(v){return v.type==="video" && feedFilter(v);}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
       var shorts = videos.filter(function(v){return v.type==="short" && feedFilter(v);}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
@@ -761,10 +783,13 @@ function loadHomeData(){
       state.homeData = { videos: vids, playlists: pls, shorts: shorts };
       if (state.screen === "home") render();
     });
+  }).catch(function(e){
+      if (state.screen === "home") render();
   });
 }
 
 function loadChannelData(chan){
+  if (!chan || !chan.id) return;
   return idbGetAllByChannel("videos", chan.id).then(function(videos){
     return idbGetAllByChannel("playlists", chan.id).then(function(playlists){
       var vids = videos.filter(function(v){return v.type==="video";}).sort(function(a,b){ return new Date(b.publishedAt) - new Date(a.publishedAt); });
@@ -773,21 +798,23 @@ function loadChannelData(chan){
       state.channelData = { videos: vids, playlists: pls, shorts: shorts };
       if (state.screen === "channel") render();
     });
+  }).catch(function(e){
+      if (state.screen === "channel") render();
   });
 }
 
 /* ---------------- NAVIGATION HELPERS ---------------- */
 function currentList(){
   if(state.screen === "home"){
-    if(state.homeTab === "channels") return channels;
+    if(state.homeTab === "channels") return channels || [];
     return state.homeData[state.homeTab] || [];
   }
   if(state.screen === "channel") return state.channelData[state.channelTab] || [];
   if(state.screen === "playlistDetail") return state.playlistData || [];
   if(state.screen === "search") return state.searchResults || [];
-  if(state.screen === "feedSettings") return channels;
-  if(state.screen === "tagList") return tagOptions;
-  if(state.screen === "taggedVideos") return state.taggedResults;
+  if(state.screen === "feedSettings") return channels || [];
+  if(state.screen === "tagList") return tagOptions || [];
+  if(state.screen === "taggedVideos") return state.taggedResults || [];
   return [];
 }
 
@@ -813,8 +840,12 @@ function openChannel(chan){
   state.channelTab = "videos";
   state.focusIndex = 0;
   closeOptions();
-  if(chan.id){ loadChannelData(chan); }
-  else { state.channelData = { videos:[], playlists:[], shorts:[] }; render(); }
+  if(chan && chan.id){ 
+     loadChannelData(chan); 
+  } else { 
+     state.channelData = { videos:[], playlists:[], shorts:[] }; 
+     render(); 
+  }
 }
 
 function openPlaylistDetail(pl){
@@ -841,7 +872,7 @@ function openTaggedVideos(tagName) {
          return tagMap[v.id] && tagMap[v.id][tagName]; 
      });
      render();
-  });
+  }).catch(function(e){});
 }
 
 function openAddChannel(){ state.screen = "addChannel"; state.focusIndex = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
@@ -891,21 +922,6 @@ function exportBackup() {
   a.click();
   document.body.removeChild(a);
   showToast("Backup downloaded!");
-}
-
-/* ---------------- OPTIONS MENU HELPERS ---------------- */
-function openOptions(items) {
-  state.optionsMenu.items = items;
-  state.optionsMenu.focusIndex = 0;
-  state.optionsMenu.open = true;
-  renderOptionsMenu();
-  renderSoftkeys();
-}
-
-function closeOptions() {
-  state.optionsMenu.open = false;
-  renderOptionsMenu();
-  renderSoftkeys();
 }
 
 /* ---------------- DOM FOCUS ENGINE & SCROLLING ---------------- */
@@ -960,7 +976,12 @@ function updateFocusDOM() {
     if(i === state.focusIndex){
       el.classList.add("focused");
       if(el.tagName === "INPUT") el.focus();
-      if(el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "auto" });
+      // Safely call scrollIntoView to prevent dict format crashes on old Gecko
+      try {
+        if(el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "auto" });
+      } catch(e){
+        if(el.scrollIntoView) el.scrollIntoView(false);
+      }
     } else {
       el.classList.remove("focused");
       if(el.tagName === "INPUT") el.blur();
@@ -979,11 +1000,15 @@ var $skCenter = document.getElementById("sk-center");
 var $skRight = document.getElementById("sk-right");
 
 function render(){
-  renderHeader(); 
-  renderTabs(); 
-  renderContent(); 
-  renderOptionsMenu();
-  renderSoftkeys();
+  try {
+    renderHeader(); 
+    renderTabs(); 
+    renderContent(); 
+    renderOptionsMenu();
+    renderSoftkeys();
+  } catch(e) {
+    console.error(e);
+  }
 }
 
 function renderHeader(){
@@ -1049,7 +1074,7 @@ function fmtMixedItem(it, focused, q){
 }
 
 function renderList(items, kind){
-  if(!items.length){
+  if(!items || !items.length){
     var msg = (kind === "channel") ? "No channels yet. Press Options -> Add." : "No data found.";
     $content.innerHTML = '<div class="empty">' + msg + '</div>';
     return;
@@ -1139,7 +1164,7 @@ function renderSettingsForm(){
 }
 
 function renderFeedSettings(){
-  if(!channels.length){ $content.innerHTML='<div class="empty">No channels added.</div>'; return; }
+  if(!channels || !channels.length){ $content.innerHTML='<div class="empty">No channels added.</div>'; return; }
   var html = '<div style="padding:6px; font-size:11px; color:#999;">Select channels to hide from Feed:</div><ul class="list">';
   channels.forEach(function(c, i){
     var focused = i === state.focusIndex;
@@ -1183,7 +1208,7 @@ function renderVideoDetail(){
     '</div>';
 
   var iframeHtml = '<div class="iframe-container focusable' + fStr(2) + '" tabindex="'+tfx(2)+'">' + 
-    '<iframe width="100%" height="140" src="https://www.youtube.com/embed/' + v.id + '" frameborder="0" allowfullscreen></iframe>' + 
+    '<iframe width="100%" height="140" src="https://www.youtube.com/embed/' + esc(v.id) + '" frameborder="0" allowfullscreen></iframe>' + 
     '</div>';
     
   var tMap = tagMap[v.id] || {};
@@ -1194,7 +1219,8 @@ function renderVideoDetail(){
   }
   tagsHtml += '</div>';
 
-  var descHtml = v.description ? '<div class="desc focusable'+fStr(4)+'" tabindex="'+tfx(4)+'">' + esc(v.description.slice(0,600)) + '</div>' : '';
+  var descText = v.description || "";
+  var descHtml = descText ? '<div class="desc focusable'+fStr(4)+'" tabindex="'+tfx(4)+'">' + esc(String(descText).slice(0,600)) + '</div>' : '';
 
   $content.innerHTML =
     '<div class="video-detail">' + btns + iframeHtml +
@@ -1222,7 +1248,9 @@ function renderOptionsMenu() {
   
   setTimeout(function(){
     var el = $menu.querySelector(".focused");
-    if(el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    if(el && el.scrollIntoView) {
+        try { el.scrollIntoView({ block: "nearest" }); } catch(e){ el.scrollIntoView(false); }
+    }
   }, 0);
 }
 
@@ -1396,7 +1424,7 @@ function doLeftAction(){
         }});
         items.push({ label: "Remove Selected", action: function() { removeChannelAt(state.focusIndex); }});
       }
-      if(channels.length) items.push({ label: "Refresh All", action: refreshAllChannels });
+      if(channels && channels.length) items.push({ label: "Refresh All", action: refreshAllChannels });
     } else {
       items.push({ label: "Refresh All", action: refreshAllChannels });
     }
@@ -1412,7 +1440,7 @@ function doLeftAction(){
       }
     }});
     items.push({ label: "Remove Channel", action: function(){
-      var idx = channels.findIndex(function(c) { return c === state.currentChannel; });
+      var idx = channels.indexOf(state.currentChannel);
       if(idx !== -1) { removeChannelAt(idx); goHome(); }
     }});
     items.push({ label: "Settings", action: openSettings });
@@ -1443,7 +1471,7 @@ function doRightAction(){
     state.screen = state.playlistSource || "home";
     render();
   } else if(state.screen === "addChannel" || state.screen === "settings"){
-    if(channels.length) goChannelsTab(); else goHome();
+    if(channels && channels.length) goChannelsTab(); else goHome();
   } else if(state.screen === "videoDetail"){
     state.screen = state.videoSource || "home";
     render();
@@ -1453,7 +1481,11 @@ function doRightAction(){
 function saveNewChannel(){
   var input = (state.formValues.input || "").trim();
   if(!input){ showToast("Enter a channel ID, handle, or URL"); return; }
-  if(channels.some(function(c){ return c.rawInput === input; })){ showToast("Channel already added"); return; }
+  
+  var isDup = false;
+  for(var i=0; i<channels.length; i++){ if(channels[i].rawInput === input) { isDup=true; break; } }
+  
+  if(isDup){ showToast("Channel already added"); return; }
   var newChan = { id:null, rawInput:input, label:state.formValues.label||input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null, excludeFeed:false };
   channels.push(newChan); saveChannels();
   goChannelsTab();
@@ -1473,7 +1505,7 @@ function removeChannelAt(idx){
 }
 
 function refreshAllChannels(){
-  if(!channels.length){ showToast("No channels to update"); return; }
+  if(!channels || !channels.length){ showToast("No channels to update"); return; }
   if(!apiKey){ showToast("Set API key in Settings"); openSettings(); return; }
   if(!confirm("Are you sure you want to update all channels?")) return;
   showToast("Refreshing all channels...");
@@ -1648,9 +1680,9 @@ $content.addEventListener("change", function(e){
           if (data.channels) {
             var added = 0;
             data.channels.forEach(function(rc){
-               if(!channels.some(function(ec){ return ec.rawInput === rc.rawInput; })){
-                 channels.push(rc); added++;
-               }
+               var dup = false;
+               for(var i=0; i<channels.length; i++){ if(channels[i].rawInput === rc.rawInput){ dup = true; break; } }
+               if(!dup){ channels.push(rc); added++; }
             });
             if(added) saveChannels();
           }
@@ -1671,7 +1703,9 @@ $content.addEventListener("change", function(e){
           lines.forEach(function(line){
             var input = line.trim();
             if(!input) return;
-            if(!channels.some(function(c){ return c.rawInput === input; })){
+            var dup = false;
+            for(var j=0; j<channels.length; j++){ if(channels[j].rawInput === input){ dup = true; break; } }
+            if(!dup){
               channels.push({ id:null, rawInput:input, label:input, uploadsPlaylistId:null, thumbnail:"", lastUpdated:null, videoCount:0, playlistCount:0, shortCount:0, error:null, excludeFeed:false });
               cAdded++;
             }
@@ -1736,7 +1770,7 @@ $skRight.addEventListener("click", doRightAction);
 openDB().then(function(_db){
   db = _db;
   if(!apiKey){
-    if(channels.length){
+    if(channels && channels.length){
       goChannelsTab();
       showToast("Set your API key in Settings");
     } else {
@@ -1744,8 +1778,8 @@ openDB().then(function(_db){
     }
   } else {
     goHome();
-    if (appSettings.autoUpdate) {
-      var limitHours = appSettings.updateInterval * 3600 * 1000;
+    if (appSettings && appSettings.autoUpdate) {
+      var limitHours = (appSettings.updateInterval || 12) * 3600 * 1000;
       var stale = channels.filter(function(c){
         return !c.lastUpdated || (Date.now() - new Date(c.lastUpdated).getTime() > limitHours);
       });
@@ -1758,7 +1792,7 @@ openDB().then(function(_db){
   }
   render();
 }).catch(function(err){
-  document.getElementById("content").innerHTML = '<div class="empty">Storage error: IndexedDB unavailable.</div>';
+  document.getElementById("content").innerHTML = '<div class="empty" style="padding-top:20px;">Storage error: DB unavailable.</div>';
 });
 
 if("serviceWorker" in navigator){ window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); }); }
