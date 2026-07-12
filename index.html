@@ -372,7 +372,8 @@ var state = {
   focusIndex: 0,
   currentChannel: null,
   currentPlaylist: null,
-  playlistSource: null,   
+  playlistSource: null,
+  videoSource: null,   
   playlistData: [],       
   homeData: { videos:[], playlists:[], shorts:[] },
   channelData: { videos:[], playlists:[], shorts:[] },
@@ -646,23 +647,39 @@ function updateChannel(chanMeta){
 }
 
 function doFuzzySearch(q) {
-  if(!q) return;
-  var lowerQ = q.toLowerCase();
-  showToast("Searching...");
+  if(q === undefined) q = state.searchQuery;
+  var lowerQ = (q || "").toLowerCase().trim();
+  
   idbGetAll("videos").then(function(vids){
       idbGetAll("playlists").then(function(pls){
           var matches = [];
-          vids.forEach(function(v){
-             if(v.title.toLowerCase().indexOf(lowerQ)>-1 || v.channelLabel.toLowerCase().indexOf(lowerQ)>-1) matches.push(v);
-          });
-          pls.forEach(function(p){
-             if(p.title.toLowerCase().indexOf(lowerQ)>-1 || p.channelLabel.toLowerCase().indexOf(lowerQ)>-1) matches.push(p);
-          });
-          state.screen = "search";
-          state.searchQuery = q;
+          if (lowerQ !== "") {
+              vids.forEach(function(v){
+                 if((v.title||"").toLowerCase().indexOf(lowerQ)>-1 || (v.channelLabel||"").toLowerCase().indexOf(lowerQ)>-1) matches.push(v);
+              });
+              pls.forEach(function(p){
+                 if((p.title||"").toLowerCase().indexOf(lowerQ)>-1 || (p.channelLabel||"").toLowerCase().indexOf(lowerQ)>-1) matches.push(p);
+              });
+          }
           state.searchResults = matches;
-          state.focusIndex = 0;
-          render();
+          
+          if(state.screen === "search") {
+              var listContainer = document.getElementById("search-list");
+              if(listContainer) {
+                  var oldC = $content; 
+                  $content = listContainer;
+                  renderList(state.searchResults, "mixed");
+                  
+                  if (state.searchResults.length === 0 && lowerQ === "") {
+                       $content.innerHTML = '<div class="empty" style="padding-top:30px;">Type above to search locally...</div>';
+                  } else if (state.searchResults.length === 0) {
+                       $content.innerHTML = '<div class="empty" style="padding-top:30px;">No matches found.</div>';
+                  }
+                  $content = oldC;
+                  // Just updates DOM focus outline properly after DOM injection
+                  updateFocusDOM();
+              }
+          }
       });
   });
 }
@@ -751,7 +768,16 @@ function openPlaylistDetail(pl){
 
 function openAddChannel(){ state.screen = "addChannel"; state.focusIndex = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
 function openSettings(){ state.screen = "settings"; state.focusIndex = 0; closeOptions(); render(); }
-function openVideoDetail(v){ state.detailVideo = v; state.screen = "videoDetail"; state.focusIndex = 0; closeOptions(); render(); }
+
+function openVideoDetail(v){ 
+  state.videoSource = state.screen; 
+  state.detailVideo = v; 
+  state.screen = "videoDetail"; 
+  state.focusIndex = 0; 
+  closeOptions(); 
+  render(); 
+}
+
 function openUrl(url){ window.open(url, "_blank"); }
 
 function doWatch(){
@@ -819,11 +845,11 @@ function updateFocusDOM() {
     var el = focusables[i];
     if(i === state.focusIndex){
       el.classList.add("focused");
-      el.setAttribute("tabindex", "0");
+      if(el.tagName === "INPUT") el.focus();
       if(el.scrollIntoView) el.scrollIntoView({ block: "nearest", behavior: "auto" });
     } else {
       el.classList.remove("focused");
-      el.setAttribute("tabindex", "-1");
+      if(el.tagName === "INPUT") el.blur();
     }
   }
 }
@@ -926,9 +952,13 @@ function renderContent(){
   } else if(state.screen === "playlistDetail"){
     renderList(currentList(), "video");
   } else if(state.screen === "search"){
-    $content.innerHTML = '<div style="padding:8px;background:#222;font-size:11px;text-align:center;">Results for: '+esc(state.searchQuery)+'</div><div id="search-list"></div>';
-    var oldC = $content; $content = document.getElementById("search-list");
+    $content.innerHTML = '<div class="form-view" style="padding:6px; background:#111; border-bottom:1px solid #333;">' +
+                         '<input type="text" id="search-box" class="fld focusable" placeholder="Type to search..." value="'+esc(state.searchQuery)+'">' +
+                         '</div><div id="search-list"></div>';
+    var oldC = $content; 
+    $content = document.getElementById("search-list");
     renderList(currentList(), "mixed");
+    if(state.searchResults.length === 0) $content.innerHTML = '<div class="empty" style="padding-top:30px;">Type above to search locally...</div>';
     $content = oldC;
   } else if(state.screen === "feedSettings"){
     renderFeedSettings();
@@ -1164,6 +1194,16 @@ function doCenterAction(){
 
   var list = currentList();
   var it = list[state.focusIndex];
+
+  if(state.screen === "search"){
+    if(state.focusIndex === 0) {
+      var sb = document.getElementById("search-box");
+      if(sb) sb.focus(); 
+      return; 
+    }
+    it = list[state.focusIndex - 1]; // Offset by 1 for the search box focusable element
+  }
+
   if(!it) return;
 
   if(state.screen === "home"){
@@ -1241,8 +1281,7 @@ function doRightAction(){
   } else if(state.screen === "addChannel" || state.screen === "settings"){
     if(channels.length) goChannelsTab(); else goHome();
   } else if(state.screen === "videoDetail"){
-    if (state.searchQuery && state.playlistSource === 'search') state.screen = "search";
-    else state.screen = state.currentPlaylist ? "playlistDetail" : (state.currentChannel ? "channel" : "home");
+    state.screen = state.videoSource || "home";
     render();
   }
 }
@@ -1309,6 +1348,19 @@ document.addEventListener("keydown", function(e){
   var key = e.key;
   var code = e.keyCode || e.which;
 
+  var isInput = document.activeElement && 
+                document.activeElement.tagName === "INPUT" && 
+                document.activeElement.type === "text" &&
+                !document.activeElement.readOnly;
+                
+  if (isInput) {
+      // Prevents our app shortcuts from capturing regular text typing keys.
+      var ignoreKeys = ["ArrowLeft", "ArrowRight", "Backspace", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+      if (ignoreKeys.indexOf(key) !== -1) {
+          return; // Let the browser handle standard typing 
+      }
+  }
+
   if (key === "Escape" || code === 27 || key === "*") key = "SoftLeft";
   else if (key === "#") key = "SoftRight";
   else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
@@ -1332,8 +1384,13 @@ document.addEventListener("keydown", function(e){
   switch(key){
     case "0":
       if(!state.optionsMenu.open && state.screen !== "addChannel" && state.screen !== "settings") {
-         var q = prompt("Fuzzy Search (Lists/Videos):");
-         if (q) doFuzzySearch(q);
+         if (state.screen !== "search") {
+             state.screen = "search";
+             state.searchQuery = "";
+             state.searchResults = [];
+             state.focusIndex = 0;
+             render();
+         }
       }
       break;
     case "1":
@@ -1374,6 +1431,14 @@ document.addEventListener("keyup", function(e){
   if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
   else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
   if (key === activeKey) stopKeyRepeat();
+});
+
+/* Seamless Real-time Typing Event Listener for Search */
+document.addEventListener("input", function(e){
+  if(e.target.id === "search-box"){
+    state.searchQuery = e.target.value;
+    doFuzzySearch(state.searchQuery);
+  }
 });
 
 /* Click/touch fallback & File upload handler */
@@ -1435,12 +1500,22 @@ $content.addEventListener("click", function(e){
   
   if(li.hasAttribute("data-idx")){
     var idx = parseInt(li.getAttribute("data-idx"), 10);
-    state.focusIndex = idx; 
+    var allFoc = Array.prototype.slice.call(document.querySelectorAll(".item, .focusable"));
+    var gIdx = allFoc.indexOf(li);
+    if (gIdx !== -1) state.focusIndex = gIdx;
+    
     if(state.screen === "feedSettings") doCenterAction();
     else openChannel(channels[idx]);
   } else if (li.classList.contains("item")) {
-    var domIdx = Array.prototype.indexOf.call(li.parentNode.children, li);
-    state.focusIndex = domIdx; doCenterAction();
+    var allFoc2 = Array.prototype.slice.call(document.querySelectorAll(".item, .focusable"));
+    var gIdx2 = allFoc2.indexOf(li);
+    if (gIdx2 !== -1) {
+        state.focusIndex = gIdx2;
+        doCenterAction();
+    }
+  } else if (li.id === "search-box") {
+    state.focusIndex = 0;
+    updateFocusDOM();
   }
 });
 
