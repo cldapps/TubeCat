@@ -62,6 +62,18 @@
   }
   #content::-webkit-scrollbar{ display:none; }
 
+  /* SCROLLBAR */
+  #scrollbar {
+    position: absolute; right: 2px; top: 38px; bottom: 30px; width: 14px;
+    pointer-events: none; z-index: 50; display: none;
+  }
+  #scroll-thumb {
+    position: absolute; right: 0; width: 14px; background: rgba(238,51,51,0.9);
+    border-radius: 4px; color: #fff; text-align: center;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 25px; transition: top 0.1s ease-out; font-weight: bold;
+  }
+
   /* Removes device native cursor outlines to let our custom .focused style takeover cleanly */
   .focusable:focus, .item:focus, .btn:focus, input:focus { outline: none; }
 
@@ -101,6 +113,14 @@
     text-align:center;
     color:#777;
     font-size:12px;
+  }
+  
+  .highlight {
+    background: #e33;
+    color: #fff;
+    padding: 0 1px;
+    border-radius: 2px;
+    font-weight: bold;
   }
 
   .channel-row {
@@ -198,6 +218,27 @@
     color:#bbb;
     margin-bottom:8px;
   }
+  .tags-container {
+    margin-bottom: 8px;
+    padding: 6px;
+    background: #1a1a1a;
+    border-radius: 4px;
+    border: 1px solid #333;
+  }
+  .tag-badge {
+    display: inline-block;
+    padding: 2px 4px;
+    margin: 2px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 9.5px;
+    color: #888;
+  }
+  .tag-badge.active {
+    background: #e33;
+    color: #fff;
+    border-color: #fff;
+  }
   .video-detail .desc {
     font-size:11.5px;
     color:#999;
@@ -249,12 +290,19 @@
   .iframe-container.focused {
     border-color: #e33;
   }
+
+  /* HELP */
+  .help-text { padding: 12px 10px; font-size: 12.5px; line-height: 1.5; color: #ccc; }
+  .help-text h3 { color: #fff; margin: 10px 0 4px; font-size: 14px; border-bottom: 1px solid #333; padding-bottom: 3px; }
+  .help-text p { margin: 0 0 10px; }
+  .help-text b { color: #e33; }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="header">TubeCat</div>
   <div id="tabs"></div>
+  <div id="scrollbar"><div id="scroll-thumb"></div></div>
   <div id="content"></div>
   <div id="options-menu"></div>
   <div id="softkeys">
@@ -279,6 +327,7 @@ var LS_CHANNELS = "tc_channels_v1";
 var LS_APIKEY   = "tc_apikey_v1";
 var LS_WATCHED  = "tc_watched_v1";
 var LS_SETTINGS = "tc_settings_v1";
+var LS_TAGS     = "tc_tags_v1";
 
 function lsGet(key, fallback){
   try {
@@ -365,6 +414,10 @@ function idbDeleteByChannel(storeName, channelId){
 }
 
 /* ---------------- STATE ---------------- */
+var tagMap = lsGet(LS_TAGS, {});
+var tagDef = {3:'like', 4:'unlike', 5:'rare', 6:'inspiring', 7:'spiritual', 8:'watchlater', 9:'important'};
+var tagOptions = Object.keys(tagDef).map(function(k){ return { title: k + " - " + tagDef[k], tagId: tagDef[k], keyNum: k }; });
+
 var state = {
   screen: "home",         
   homeTab: "videos",      
@@ -372,6 +425,7 @@ var state = {
   focusIndex: 0,
   currentChannel: null,
   currentPlaylist: null,
+  currentTag: null,
   playlistSource: null,
   videoSource: null,   
   playlistData: [],       
@@ -379,6 +433,7 @@ var state = {
   channelData: { videos:[], playlists:[], shorts:[] },
   searchQuery: "",
   searchResults: [],
+  taggedResults: [],
   toast: null,
   toastTimer: null,
   formValues: { input:"", label:"" },
@@ -405,11 +460,20 @@ if(!channels){
 function saveChannels(){ lsSet(LS_CHANNELS, channels); }
 function saveWatched(){ lsSet(LS_WATCHED, watchedMap); }
 function saveAppSettings(){ lsSet(LS_SETTINGS, appSettings); }
+function saveTags(){ lsSet(LS_TAGS, tagMap); }
 
 /* ---------------- UTIL ---------------- */
 function esc(s){
   if(s == null) return "";
   return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function highlightText(text, query) {
+  var eText = esc(text);
+  if (!query) return eText;
+  var safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  var regex = new RegExp("(" + safeQuery + ")", "gi");
+  return eText.replace(regex, '<span class="highlight">$1</span>');
 }
 
 function timeAgo(iso){
@@ -722,6 +786,8 @@ function currentList(){
   if(state.screen === "playlistDetail") return state.playlistData || [];
   if(state.screen === "search") return state.searchResults || [];
   if(state.screen === "feedSettings") return channels;
+  if(state.screen === "tagList") return tagOptions;
+  if(state.screen === "taggedVideos") return state.taggedResults;
   return [];
 }
 
@@ -766,8 +832,21 @@ function openPlaylistDetail(pl){
   }).catch(function(e){ showToast("Failed to load playlist"); });
 }
 
+function openTaggedVideos(tagName) {
+  state.screen = "taggedVideos";
+  state.currentTag = tagName;
+  state.focusIndex = 0;
+  idbGetAll("videos").then(function(vids){
+     state.taggedResults = vids.filter(function(v){ 
+         return tagMap[v.id] && tagMap[v.id][tagName]; 
+     });
+     render();
+  });
+}
+
 function openAddChannel(){ state.screen = "addChannel"; state.focusIndex = 0; state.formValues = { input:"", label:"" }; closeOptions(); render(); }
 function openSettings(){ state.screen = "settings"; state.focusIndex = 0; closeOptions(); render(); }
+function openHelp(){ state.screen = "help"; state.focusIndex = 0; closeOptions(); render(); }
 
 function openVideoDetail(v){ 
   state.videoSource = state.screen; 
@@ -801,7 +880,7 @@ function toggleWatched(){
 }
 
 function exportBackup() {
-  var data = { channels: channels, watched: watchedMap };
+  var data = { channels: channels, watched: watchedMap, tags: tagMap };
   var str = JSON.stringify(data, null, 2);
   var blob = new Blob([str], { type: "application/json" });
   var url = URL.createObjectURL(blob);
@@ -829,14 +908,49 @@ function closeOptions() {
   renderSoftkeys();
 }
 
-/* ---------------- DOM FOCUS ENGINE (NO RENDER) ---------------- */
+/* ---------------- DOM FOCUS ENGINE & SCROLLING ---------------- */
+function updateScrollbar() {
+  var $scrollbar = document.getElementById("scrollbar");
+  var $scrollThumb = document.getElementById("scroll-thumb");
+  var list = currentList();
+  
+  var validScreens = ["home", "channel", "playlistDetail", "search", "taggedVideos", "tagList", "feedSettings"];
+  if (!list || list.length === 0 || validScreens.indexOf(state.screen) === -1) {
+      $scrollbar.style.display = "none";
+      return;
+  }
+  
+  $scrollbar.style.display = "block";
+  var sh = $content.scrollHeight;
+  var ch = $content.clientHeight;
+  var st = $content.scrollTop;
+  
+  var thumbH = Math.max(25, (ch / sh) * ch);
+  if(thumbH > ch) thumbH = ch; 
+  
+  var maxTop = ch - thumbH;
+  var pct = (sh > ch) ? (st / (sh - ch)) : 0;
+  
+  $scrollThumb.style.height = thumbH + "px";
+  $scrollThumb.style.top = (pct * maxTop) + "px";
+  
+  var idx = state.focusIndex + 1;
+  var tot = list.length;
+  $scrollThumb.innerHTML = "<span style='transform:scale(0.75); line-height: 1.1;'>" + idx + "<br/>/<br/>" + tot + "</span>";
+}
+
+$content.addEventListener("scroll", updateScrollbar);
+
 function updateFocusDOM() {
   if (state.optionsMenu.open) {
     renderOptionsMenu();
     return;
   }
   var focusables = document.querySelectorAll(".item, .focusable");
-  if (!focusables.length) return;
+  if (!focusables.length) {
+    updateScrollbar();
+    return;
+  }
   
   if (state.focusIndex < 0) state.focusIndex = focusables.length - 1;
   if (state.focusIndex >= focusables.length) state.focusIndex = 0;
@@ -852,6 +966,8 @@ function updateFocusDOM() {
       if(el.tagName === "INPUT") el.blur();
     }
   }
+  
+  setTimeout(updateScrollbar, 20); 
 }
 
 /* ---------------- RENDER ---------------- */
@@ -879,6 +995,9 @@ function renderHeader(){
   if(state.screen === "feedSettings") title = "Feed Exclusions";
   if(state.screen === "videoDetail") title = "Details";
   if(state.screen === "search") title = "Search Results";
+  if(state.screen === "tagList") title = "Tags Menu";
+  if(state.screen === "taggedVideos") title = "Tag: " + (state.currentTag||"").toUpperCase();
+  if(state.screen === "help") title = "Help Menu";
   $header.textContent = title;
 }
 
@@ -900,44 +1019,50 @@ function renderTabs(){
   }
 }
 
-function fmtVideoItem(v, focused){
+function fmtVideoItem(v, focused, q){
   var badge = v.type === "short" ? '<span class="badge">SHORT</span>' : '';
   var watched = watchedMap[v.id] ? '<span style="color:#e33; margin-right:4px;">●</span>' : '';
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(v.id) + '">' +
-    watched + badge + esc(v.title) +
-    '<span class="meta">' + esc(v.channelLabel||"") + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
+    watched + badge + highlightText(v.title, q) +
+    '<span class="meta">' + highlightText(v.channelLabel||"", q) + (v.channelLabel? " &middot; ":"") + timeAgo(v.publishedAt) + '</span>' +
     '</li>';
 }
-function fmtPlaylistItem(p, focused){
+function fmtPlaylistItem(p, focused, q){
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-id="' + esc(p.id) + '">' +
-    esc(p.title) + '<span class="meta">' + esc(p.channelLabel||"") + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
+    highlightText(p.title, q) + '<span class="meta">' + highlightText(p.channelLabel||"", q) + (p.channelLabel?" &middot; ":"") + (p.itemCount||0) + ' videos</span></li>';
 }
-function fmtChannelItem(c, idx, focused){
+function fmtChannelItem(c, idx, focused, q){
   var status = state.updating[c.rawInput] ? "Updating..." : (c.error ? "Update failed" : ("Updated " + timeAgo(c.lastUpdated)));
   var thumb = c.thumbnail ? '<img src="' + esc(c.thumbnail) + '">' : '<img src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==">';
   return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '" data-idx="' + idx + '">' +
-    '<div class="channel-row">' + thumb + '<span class="name">' + esc(c.label) + '</span></div>' +
+    '<div class="channel-row">' + thumb + '<span class="name">' + highlightText(c.label, q) + '</span></div>' +
     '<span class="meta">' + status + ' &middot; ' + (c.videoCount||0) + 'v ' + (c.playlistCount||0) + 'p ' + (c.shortCount||0) + 's</span>' +
     '</li>';
 }
-function fmtMixedItem(it, focused){
-  if(it.itemCount !== undefined) return fmtPlaylistItem(it, focused);
-  return fmtVideoItem(it, focused);
+function fmtTagItem(t, focused){
+  return '<li class="item focusable' + (focused?' focused':'') + '" tabindex="' + (focused ? '0' : '-1') + '">' + esc(t.title) + '</li>';
+}
+function fmtMixedItem(it, focused, q){
+  if(it.isTag) return fmtTagItem(it, focused);
+  if(it.itemCount !== undefined) return fmtPlaylistItem(it, focused, q);
+  return fmtVideoItem(it, focused, q);
 }
 
 function renderList(items, kind){
   if(!items.length){
-    var msg = (kind === "channel") ? "No channels yet. Press Options -> Add." : "No data yet.";
+    var msg = (kind === "channel") ? "No channels yet. Press Options -> Add." : "No data found.";
     $content.innerHTML = '<div class="empty">' + msg + '</div>';
     return;
   }
+  var q = (state.screen === 'search') ? state.searchQuery : "";
   var html = '<ul class="list">';
   items.forEach(function(it, i){
     var focused = i === state.focusIndex;
-    if(kind === "video") html += fmtVideoItem(it, focused);
-    else if(kind === "playlist") html += fmtPlaylistItem(it, focused);
-    else if(kind === "channel") html += fmtChannelItem(it, i, focused);
-    else html += fmtMixedItem(it, focused);
+    if(kind === "video") html += fmtVideoItem(it, focused, q);
+    else if(kind === "playlist") html += fmtPlaylistItem(it, focused, q);
+    else if(kind === "channel") html += fmtChannelItem(it, i, focused, q);
+    else if(kind === "tag") html += fmtTagItem(it, focused);
+    else html += fmtMixedItem(it, focused, q);
   });
   html += "</ul>";
   $content.innerHTML = html;
@@ -968,6 +1093,13 @@ function renderContent(){
     renderSettingsForm();
   } else if(state.screen === "videoDetail"){
     renderVideoDetail();
+  } else if(state.screen === "tagList"){
+    var items = tagOptions.map(function(t) { return { title: t.keyNum + " - " + t.tagId, isTag: true, tagId: t.tagId }; });
+    renderList(items, "mixed"); 
+  } else if(state.screen === "taggedVideos"){
+    renderList(currentList(), "video");
+  } else if(state.screen === "help"){
+    renderHelp();
   }
   setTimeout(updateFocusDOM, 0); 
 }
@@ -1018,6 +1150,22 @@ function renderFeedSettings(){
   $content.innerHTML = html;
 }
 
+function renderHelp() {
+  var html = '<div class="help-text">' +
+    '<h3>Navigation</h3>' +
+    '<p>Use <b>Arrow Keys</b> or <b>2,4,6,8</b> to navigate. <b>Enter/Center</b> to select.</p>' +
+    '<h3>Global Shortcuts</h3>' +
+    '<p><b>1,2,3,4:</b> Switch main tabs.<br>' +
+    '<b>0:</b> Open Global Search.<br>' +
+    '<b>#:</b> Open Tags Menu.</p>' +
+    '<h3>Video Details</h3>' +
+    '<p>Press numbers <b>3 to 9</b> to attach specific tags to a video.<br>' +
+    'Press <b>1</b> to Watch.<br>' +
+    'Press <b>2</b> to toggle Watched status.</p>' +
+    '</div>';
+  $content.innerHTML = html;
+}
+
 function renderVideoDetail(){
   var v = state.detailVideo;
   if(!v){ $content.innerHTML = '<div class="empty">No item</div>'; return; }
@@ -1038,13 +1186,21 @@ function renderVideoDetail(){
     '<iframe width="100%" height="140" src="https://www.youtube.com/embed/' + v.id + '" frameborder="0" allowfullscreen></iframe>' + 
     '</div>';
     
-  var descHtml = v.description ? '<div class="desc focusable'+fStr(3)+'" tabindex="'+tfx(3)+'">' + esc(v.description.slice(0,600)) + '</div>' : '';
+  var tMap = tagMap[v.id] || {};
+  var tagsHtml = '<div class="tags-container focusable'+fStr(3)+'" tabindex="'+tfx(3)+'">';
+  for (var k in tagDef) {
+      var isActive = tMap[tagDef[k]];
+      tagsHtml += '<span class="tag-badge' + (isActive ? ' active' : '') + '">' + k + '-' + tagDef[k] + '</span> ';
+  }
+  tagsHtml += '</div>';
+
+  var descHtml = v.description ? '<div class="desc focusable'+fStr(4)+'" tabindex="'+tfx(4)+'">' + esc(v.description.slice(0,600)) + '</div>' : '';
 
   $content.innerHTML =
     '<div class="video-detail">' + btns + iframeHtml +
     '<h2>' + esc(v.title) + '</h2>' +
     '<div class="chan">' + esc(v.channelLabel||"") + '</div>' +
-    descHtml +
+    tagsHtml + descHtml +
     '<div class="url">' + esc(v.url) + '</div>' +
     '</div>';
 }
@@ -1078,12 +1234,14 @@ function renderSoftkeys(){
   } else {
     if(state.screen === "home") r = "Exit";
 
-    if(state.screen === "home" || state.screen === "channel" || state.screen === "playlistDetail" || state.screen === "search"){
+    if(["home", "channel", "playlistDetail", "search", "tagList", "taggedVideos"].indexOf(state.screen) > -1){
       c = "Open";
     } else if(state.screen === "addChannel" || state.screen === "settings") {
       c = "Edit";
     } else if(state.screen === "feedSettings") {
       c = "Toggle";
+    } else if(state.screen === "help") {
+      c = "";
     } else if(state.screen === "videoDetail") {
       if(state.focusIndex === 0 || state.focusIndex === 1) c = "Select";
       else c = "Scroll";
@@ -1203,6 +1361,11 @@ function doCenterAction(){
     }
     it = list[state.focusIndex - 1]; // Offset by 1 for the search box focusable element
   }
+  
+  if(state.screen === "tagList"){
+    openTaggedVideos(tagOptions[state.focusIndex].tagId);
+    return;
+  }
 
   if(!it) return;
 
@@ -1213,7 +1376,7 @@ function doCenterAction(){
   } else if(state.screen === "channel"){
     if(state.channelTab === "playlists") openPlaylistDetail(it);
     else openVideoDetail(it);
-  } else if(state.screen === "playlistDetail" || state.screen === "search"){
+  } else if(state.screen === "playlistDetail" || state.screen === "search" || state.screen === "taggedVideos"){
     if(it.itemCount !== undefined) openPlaylistDetail(it);
     else openVideoDetail(it);
   }
@@ -1237,6 +1400,7 @@ function doLeftAction(){
     } else {
       items.push({ label: "Refresh All", action: refreshAllChannels });
     }
+    items.push({ label: "Help", action: openHelp });
     items.push({ label: "Settings", action: openSettings });
   } else if(state.screen === "channel"){
     items.push({ label: "Update This Channel", action: function(){
@@ -1252,7 +1416,7 @@ function doLeftAction(){
       if(idx !== -1) { removeChannelAt(idx); goHome(); }
     }});
     items.push({ label: "Settings", action: openSettings });
-  } else if(state.screen === "playlistDetail" || state.screen === "search" || state.screen === "feedSettings"){
+  } else if(["playlistDetail", "search", "feedSettings", "taggedVideos"].indexOf(state.screen) > -1){
     items.push({ label: "Settings", action: openSettings });
   } else if(state.screen === "addChannel"){
     items.push({ label: "Save Channel", action: saveNewChannel });
@@ -1273,7 +1437,7 @@ function doRightAction(){
   
   if(state.screen === "home"){
     showToast("To exit, press Home button");
-  } else if(state.screen === "channel" || state.screen === "search" || state.screen === "feedSettings"){
+  } else if(["channel", "search", "feedSettings", "tagList", "taggedVideos", "help"].indexOf(state.screen) > -1){
     goHome();
   } else if(state.screen === "playlistDetail"){
     state.screen = state.playlistSource || "home";
@@ -1360,9 +1524,18 @@ document.addEventListener("keydown", function(e){
           return; // Let the browser handle standard typing 
       }
   }
+  
+  if (key === "#") {
+     e.preventDefault();
+     if (!state.optionsMenu.open && ["addChannel", "settings", "help"].indexOf(state.screen) === -1) {
+         state.screen = "tagList";
+         state.focusIndex = 0;
+         render();
+     }
+     return;
+  }
 
   if (key === "Escape" || code === 27 || key === "*") key = "SoftLeft";
-  else if (key === "#") key = "SoftRight";
   else if (key === "ArrowUp" || key === "Up" || code === 38) key = "ArrowUp";
   else if (key === "ArrowDown" || key === "Down" || code === 40) key = "ArrowDown";
   else if (key === "ArrowLeft" || key === "Left" || code === 37) key = "ArrowLeft";
@@ -1380,6 +1553,25 @@ document.addEventListener("keydown", function(e){
   
   // Normal non-repeating
   stopKeyRepeat();
+  
+  var keyNum = parseInt(key, 10);
+  if (state.screen === "videoDetail" && !isNaN(keyNum) && keyNum >= 3 && keyNum <= 9) {
+     e.preventDefault();
+     var vId = state.detailVideo.id;
+     if (!tagMap[vId]) tagMap[vId] = {};
+     var tName = tagDef[keyNum];
+     tagMap[vId][tName] = !tagMap[vId][tName];
+     saveTags();
+     renderVideoDetail();
+     updateFocusDOM();
+     return;
+  }
+  
+  if (state.screen === "tagList" && !isNaN(keyNum) && keyNum >= 3 && keyNum <= 9) {
+     e.preventDefault();
+     openTaggedVideos(tagDef[keyNum]);
+     return;
+  }
 
   switch(key){
     case "0":
@@ -1465,6 +1657,10 @@ $content.addEventListener("change", function(e){
           if (data.watched) {
             Object.keys(data.watched).forEach(function(k){ watchedMap[k] = true; });
             saveWatched();
+          }
+          if (data.tags) {
+            Object.keys(data.tags).forEach(function(k){ tagMap[k] = data.tags[k]; });
+            saveTags();
           }
           showToast("Backup restored successfully!");
           renderContent();
