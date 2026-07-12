@@ -1420,6 +1420,10 @@ function doLeftAction(){
     items.push({ label: "Settings", action: openSettings });
   } else if(state.screen === "addChannel"){
     items.push({ label: "Save Channel", action: saveNewChannel });
+  } else if(state.screen === "settings"){
+    items.push({ label: "Save & Close", action: function(){
+      if(channels.length) goChannelsTab(); else goHome();
+    }});
   } else if(state.screen === "videoDetail"){
     items.push({ label: "Watch (yout-ube.com)", action: doWatch });
     items.push({ label: (watchedMap[state.detailVideo.id] ? "Mark Unwatched" : "Mark Watched"), action: toggleWatched });
