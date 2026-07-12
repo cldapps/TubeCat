@@ -127,12 +127,10 @@
     display:inline-block;
     white-space:nowrap;
     animation: tc-marquee 7s linear infinite;
-    animation-delay: 1s;
     padding-right:40px; /* gap before it loops back */
   }
   @keyframes tc-marquee {
     0%   { transform: translateX(0); }
-    15%  { transform: translateX(0); }        /* brief pause so the start is readable */
     75%  { transform: translateX(var(--tc-marquee-shift, -100%)); }
     92%  { transform: translateX(var(--tc-marquee-shift, -100%)); } /* hold at the end before looping */
     100% { transform: translateX(0); }
